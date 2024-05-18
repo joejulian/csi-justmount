@@ -1,0 +1,31 @@
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: justmount
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      app: justmount
+  template:
+    metadata:
+      labels:
+        app: justmount
+    spec:
+      containers:
+        - name: justmount
+          image: joejulian/csi-justmount:latest
+          args:
+            - "--endpoint=$(CSI_ENDPOINT)"
+          env:
+            - name: CSI_ENDPOINT
+              value: "unix:///var/lib/csi/sockets/justmount/csi.sock"
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /var/lib/csi/sockets/justmount/
+      volumes:
+        - name: socket-dir
+          hostPath:
+            path: /var/lib/csi/sockets/justmount/
+            type: DirectoryOrCreate

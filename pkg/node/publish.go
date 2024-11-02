@@ -2,10 +2,12 @@ package node
 
 import (
 	"context"
+	"log"
 	"os"
 	"syscall"
 
 	csi "github.com/container-storage-interface/spec/lib/go/csi"
+	"github.com/joejulian/csi-justmount/pkg/util"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -26,8 +28,29 @@ func (n *Node) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolume
 		return nil, status.Error(codes.InvalidArgument, "volume_capability is required")
 	}
 
-	// Implement the actual logic to publish the volume here
-	// For now, return success as a placeholder
+	// Check if the staging path is provided, as required for bind-mounting
+	if req.GetStagingTargetPath() == "" {
+		return nil, status.Error(codes.InvalidArgument, "staging_target_path is required")
+	}
+
+	// Ensure the staging path is a mount point
+	isMounted, err := util.IsMountPoint(req.GetStagingTargetPath())
+	if err != nil {
+		log.Printf("failed to verify if staging path is a mount point: %v", err)
+		return nil, status.Errorf(codes.Internal, "failed to verify if staging path is a mount point: %v", err)
+	}
+	if !isMounted {
+		return nil, status.Error(codes.FailedPrecondition, "staging_target_path is not a mount point")
+	}
+
+	// Perform a bind mount from the staging path to the target path
+	err = syscall.Mount(req.GetStagingTargetPath(), req.GetTargetPath(), "", syscall.MS_BIND, "")
+	if err != nil {
+		log.Printf("failed to bind-mount volume from %s to %s: %v", req.GetStagingTargetPath(), req.GetTargetPath(), err)
+		return nil, status.Errorf(codes.Internal, "failed to bind-mount volume: %v", err)
+	}
+
+	// Return success response
 	return &csi.NodePublishVolumeResponse{}, nil
 }
 

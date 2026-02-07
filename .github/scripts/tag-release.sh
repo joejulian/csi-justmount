@@ -32,7 +32,7 @@ log_range = "${log_range}"
 def git(*args: str) -> str:
     return subprocess.check_output(["git", *args], text=True)
 
-raw = git("log", log_range, "--format=%s%n%b%n==END==")
+raw = git("log", log_range, "--no-merges", "--format=%s%n%b%n==END==")
 commits = [c.strip() for c in raw.split("==END==") if c.strip()]
 
 def is_release_commit(subject: str) -> bool:

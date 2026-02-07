@@ -2,7 +2,10 @@ package node
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"syscall"
@@ -107,7 +110,13 @@ func (n *Node) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequ
 	// Perform the mount operation with the specified fsType
 	err = n.mounter.Mount(source, volumePath, fsType, flags, data)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to mount volume: %v", err)
+		if isNoSuchDevice(err) {
+			if execErr := mountHelper(fsType, source, volumePath, opts); execErr != nil {
+				return nil, status.Errorf(codes.Internal, "failed to mount volume: %v", execErr)
+			}
+		} else {
+			return nil, status.Errorf(codes.Internal, "failed to mount volume: %v", err)
+		}
 	}
 
 	// Re-apply file mode after mounting, as mount may override permissions
@@ -139,3 +148,26 @@ func (n *Node) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstageVolume
 	// Return success response
 	return &csi.NodeUnstageVolumeResponse{}, nil
 }
+
+func isNoSuchDevice(err error) bool {
+	if errors.Is(err, syscall.ENODEV) {
+		return true
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "no such device")
+}
+
+func execMountHelper(fsType, source, target, opts string) error {
+	args := []string{"-t", fsType}
+	if strings.TrimSpace(opts) != "" {
+		args = append(args, "-o", opts)
+	}
+	args = append(args, source, target)
+	cmd := exec.Command("mount", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("mount helper failed: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+var mountHelper = execMountHelper

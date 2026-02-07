@@ -1,4 +1,13 @@
-FROM gcr.io/distroless/static:latest
+FROM debian:bookworm-slim
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+      ca-certificates \
+      ceph-fuse \
+      fuse3 \
+      glusterfs-client \
+      s3fs \
+      sshfs && \
+    rm -rf /var/lib/apt/lists/*
 COPY justmount /justmount
 USER 0:0
 ENTRYPOINT ["/justmount"]

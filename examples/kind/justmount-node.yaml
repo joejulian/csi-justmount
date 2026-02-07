@@ -65,6 +65,8 @@ spec:
             - name: kubelet-dir
               mountPath: /var/lib/kubelet
               mountPropagation: Bidirectional
+            - name: fuse-dev
+              mountPath: /dev/fuse
       volumes:
         - name: plugin-dir
           hostPath:
@@ -78,3 +80,7 @@ spec:
           hostPath:
             path: /var/lib/kubelet
             type: Directory
+        - name: fuse-dev
+          hostPath:
+            path: /dev/fuse
+            type: CharDevice

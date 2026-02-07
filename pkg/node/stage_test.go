@@ -4,24 +4,18 @@ import (
 	"context"
 	"os"
 	"strconv"
-	"syscall"
 	"testing"
 
 	csi "github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/joejulian/csi-justmount/pkg/node"
-	"github.com/joejulian/csi-justmount/pkg/util"
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
 func TestNodeStageVolume(t *testing.T) {
-	skipIfNoMount(t)
-	n := node.NewNode("/tmp/test-csi.sock", "node-id")
-	go func() {
-		_ = n.Run()
-	}()
-	defer n.Stop()
+	fake := newFakeMounter()
+	n := node.NewNodeWithMounter("node-id", "/tmp/test-csi.sock", fake)
 	// Create a temporary staging directory
 	stagingPath, err := os.MkdirTemp("", "csi-staging-")
 	assert.NoError(t, err, "Failed to create temp staging directory")
@@ -158,7 +152,7 @@ func TestNodeStageVolume(t *testing.T) {
 				assert.NoError(t, err)
 
 				// Verify the mount point and permissions
-				isMounted, err := util.IsMountPoint(stagingPath)
+				isMounted, err := fake.IsMountPoint(stagingPath)
 				assert.NoError(t, err)
 				assert.True(t, isMounted, "the volume path should be a mount point")
 
@@ -171,7 +165,7 @@ func TestNodeStageVolume(t *testing.T) {
 				}
 
 				// Unmount after the test
-				err = syscall.Unmount(stagingPath, 0)
+				err = fake.Unmount(stagingPath, 0)
 				assert.NoError(t, err, "Failed to unmount volume path after test")
 			} else {
 				st, _ := status.FromError(err)
@@ -186,12 +180,8 @@ func TestNodeStageVolume(t *testing.T) {
 }
 
 func TestNodeUnstageVolume(t *testing.T) {
-	skipIfNoMount(t)
-	n := node.NewNode("/tmp/test-csi.sock", "node-id")
-	go func() {
-		_ = n.Run()
-	}()
-	defer n.Stop()
+	fake := newFakeMounter()
+	n := node.NewNodeWithMounter("node-id", "/tmp/test-csi.sock", fake)
 
 	// Create a temporary staging directory
 	stagingPath, err := os.MkdirTemp("", "csi-staging-")
@@ -230,8 +220,7 @@ func TestNodeUnstageVolume(t *testing.T) {
 
 			// Simulate mounting for the valid test case
 			if tc.expectErrorCode == codes.OK {
-				err = syscall.Mount("tmpfs", stagingPath, "tmpfs", 0, "")
-				assert.NoError(t, err, "Failed to mount tmpfs for testing unstage")
+				_ = fake.Mount("tmpfs", stagingPath, "tmpfs", 0, "")
 				tc.stagingTargetPath = stagingPath
 			}
 
@@ -245,7 +234,7 @@ func TestNodeUnstageVolume(t *testing.T) {
 				assert.NoError(t, err)
 
 				// Check if the mount has been removed
-				isMounted, err := util.IsMountPoint(stagingPath)
+				isMounted, err := fake.IsMountPoint(stagingPath)
 				assert.NoError(t, err)
 				assert.False(t, isMounted, "The volume mount path should be unmounted")
 			} else {
@@ -258,7 +247,7 @@ func TestNodeUnstageVolume(t *testing.T) {
 			}
 
 			// Final cleanup: Attempt to unmount if still mounted
-			_ = syscall.Unmount(stagingPath, 0)
+			_ = fake.Unmount(stagingPath, 0)
 		})
 	}
 }

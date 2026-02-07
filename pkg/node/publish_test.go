@@ -3,24 +3,19 @@ package node_test
 import (
 	"context"
 	"os"
-	"syscall"
 	"testing"
 
 	csi "github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/joejulian/csi-justmount/pkg/node"
-	"github.com/joejulian/csi-justmount/pkg/util"
+	"github.com/joejulian/csi-justmount/pkg/node/nodefakes"
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
 func TestNodePublishVolume(t *testing.T) {
-	skipIfNoMount(t)
-	n := node.NewNode("/tmp/test-csi.sock", "node-id")
-	go func() {
-		_ = n.Run()
-	}()
-	defer n.Stop()
+	fake := newFakeMounter()
+	n := node.NewNodeWithMounter("node-id", "/tmp/test-csi.sock", fake)
 
 	tests := []struct {
 		name             string
@@ -115,7 +110,7 @@ func TestNodePublishVolume(t *testing.T) {
 				targetPath = ""
 			}
 
-			// If expecting success, create and mount tmpfs to staging path
+			// If expecting success, record staging as mounted
 			if tc.expectErrorCode == codes.OK {
 				err := os.MkdirAll(stagingPath, 0755)
 				assert.NoError(t, err, "Failed to create staging directory")
@@ -154,13 +149,9 @@ func TestNodePublishVolume(t *testing.T) {
 				assert.NoError(t, err)
 
 				// Verify if the target path is bind-mounted
-				isMounted, err := util.IsMountPoint(targetPath)
+				isMounted, err := fake.IsMountPoint(targetPath)
 				assert.NoError(t, err)
 				assert.True(t, isMounted, "The target path should be a bind mount point")
-
-				// Unmount after the test
-				err = syscall.Unmount(targetPath, 0)
-				assert.NoError(t, err, "Failed to unmount target path after test")
 			} else {
 				st, _ := status.FromError(err)
 				assert.Equal(t, tc.expectErrorCode, st.Code())
@@ -171,8 +162,26 @@ func TestNodePublishVolume(t *testing.T) {
 			}
 
 			// Final cleanup: Unmount if mounted
-			_ = syscall.Unmount(targetPath, 0)
-			_ = syscall.Unmount(stagingPath, 0)
+			_ = fake.Unmount(targetPath, 0)
+			_ = fake.Unmount(stagingPath, 0)
 		})
 	}
+}
+
+func newFakeMounter() *nodefakes.FakeMounter {
+	fake := &nodefakes.FakeMounter{}
+	mounted := map[string]bool{}
+
+	fake.MountStub = func(source, target, fstype string, flags uintptr, data string) error {
+		mounted[target] = true
+		return nil
+	}
+	fake.UnmountStub = func(target string, flags int) error {
+		delete(mounted, target)
+		return nil
+	}
+	fake.IsMountPointStub = func(path string) (bool, error) {
+		return mounted[path], nil
+	}
+	return fake
 }

@@ -19,3 +19,6 @@ kind-test:
 
 kind-clean:
   KUBECONFIG={{KUBECONFIG}} examples/kind/cleanup.sh
+
+gen:
+  go generate ./...

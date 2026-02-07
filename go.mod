@@ -143,6 +143,7 @@ require (
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-runewidth v0.0.16 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.1 // indirect
+	github.com/maxbrunsfeld/counterfeiter/v6 v6.12.1 // indirect
 	github.com/mgechev/revive v1.13.0 // indirect
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
 	github.com/moricho/tparallel v0.3.2 // indirect
@@ -225,3 +226,5 @@ require (
 )
 
 tool github.com/golangci/golangci-lint/v2/cmd/golangci-lint
+
+tool github.com/maxbrunsfeld/counterfeiter/v6

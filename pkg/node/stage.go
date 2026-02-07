@@ -8,7 +8,6 @@ import (
 	"syscall"
 
 	csi "github.com/container-storage-interface/spec/lib/go/csi"
-	"github.com/joejulian/csi-justmount/pkg/util"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -68,7 +67,7 @@ func (n *Node) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequ
 	}
 
 	// If already mounted, return success (idempotent)
-	isMounted, err := util.IsMountPoint(volumePath)
+	isMounted, err := n.mounter.IsMountPoint(volumePath)
 	if err == nil && isMounted {
 		return &csi.NodeStageVolumeResponse{}, nil
 	}
@@ -106,7 +105,7 @@ func (n *Node) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequ
 	data := strings.Join(dataOpts, ",")
 
 	// Perform the mount operation with the specified fsType
-	err = syscall.Mount(source, volumePath, fsType, flags, data)
+	err = n.mounter.Mount(source, volumePath, fsType, flags, data)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to mount volume: %v", err)
 	}
@@ -132,7 +131,7 @@ func (n *Node) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstageVolume
 	}
 
 	// Attempt to unmount the staging target path
-	err := syscall.Unmount(req.GetStagingTargetPath(), 0)
+	err := n.mounter.Unmount(req.GetStagingTargetPath(), 0)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to unmount staging target path: %v", err)
 	}

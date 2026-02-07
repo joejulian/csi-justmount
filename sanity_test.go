@@ -26,7 +26,7 @@ func TestCSISanity(t *testing.T) {
 	suiteConfig, reporterConfig := GinkgoConfiguration()
 	// suiteConfig.FocusStrings = []string{"should fail when no node id is provided"}
 	suiteConfig.SkipStrings = []string{
-		// node-only driver; skip all controller tests
+		// node-only driver; skip controller tests
 		"[Controller Server]",
 
 		// require CreateVolume
@@ -89,7 +89,9 @@ func probeMount() error {
 // AfterSuite to stop the CSI driver and clean up
 var _ = AfterSuite(func() {
 	// Stop the CSI driver
-	n.Stop()
+	if n != nil {
+		n.Stop()
+	}
 	// Clean up temporary directories
 	if tempDir != "" {
 		os.RemoveAll(tempDir)

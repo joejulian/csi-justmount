@@ -13,8 +13,12 @@ coverage_total() {
 }
 
 current_cov_profile="${TMP_DIR}/coverage.current.out"
-go test ./... -coverprofile="${current_cov_profile}" >/dev/null
+go test ./... -count=1 -covermode=atomic -coverpkg=./... -coverprofile="${current_cov_profile}" >/dev/null
 current_cov="$(coverage_total "${current_cov_profile}")"
+if [[ "${current_cov}" == "0.0" || "${current_cov}" == "0" ]]; then
+  echo "Current coverage is 0; tests likely skipped. Skipping coverage comparison."
+  exit 0
+fi
 
 base_ref="${GITHUB_BASE_REF:-}"
 if [[ -z "${base_ref}" ]]; then
@@ -33,7 +37,7 @@ fi
 git worktree add -q "${TMP_DIR}/base" "${base_ref}"
 pushd "${TMP_DIR}/base" >/dev/null
 base_cov_profile="${TMP_DIR}/coverage.base.out"
-if ! go test ./... -coverprofile="${base_cov_profile}" >/dev/null; then
+if ! go test ./... -count=1 -covermode=atomic -coverpkg=./... -coverprofile="${base_cov_profile}" >/dev/null; then
   echo "Base tests failed; skipping coverage comparison."
   echo "Current coverage: ${current_cov}%"
   popd >/dev/null

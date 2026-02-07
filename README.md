@@ -156,7 +156,6 @@ generate tags and changelogs.
 ### Directory Structure
 
 - `main.go`: Main entry point for the driver.
-- `pkg/controller`: Contains Controller service code.
 - `pkg/node`: Contains Node service code.
 - `sanity_test.go`: Test configuration for `csi-sanity`.
 

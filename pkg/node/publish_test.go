@@ -15,6 +15,7 @@ import (
 )
 
 func TestNodePublishVolume(t *testing.T) {
+	skipIfNoMount(t)
 	n := node.NewNode("/tmp/test-csi.sock", "node-id")
 	go func() {
 		_ = n.Run()

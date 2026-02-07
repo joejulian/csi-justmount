@@ -3,6 +3,7 @@
 package main_test
 
 import (
+	"errors"
 	"log"
 	"os"
 	"testing"
@@ -13,10 +14,11 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/joejulian/csi-justmount/pkg/node"
+	"syscall"
 )
 
 const (
-	nodeEndpoint       = "/tmp/csi-justmount-node.sock"
+	nodeEndpoint = "/tmp/csi-justmount-node.sock"
 )
 
 func TestCSISanity(t *testing.T) {
@@ -51,6 +53,11 @@ var (
 
 // BeforeSuite to start the CSI driver
 var _ = BeforeSuite(func() {
+	// Skip sanity tests if mounts aren't permitted in this environment.
+	if err := probeMount(); err != nil {
+		Skip(err.Error())
+	}
+
 	// Start the CSI node
 	n = node.NewNode("sanity-test-1", nodeEndpoint)
 	go func() {
@@ -61,6 +68,23 @@ var _ = BeforeSuite(func() {
 	// Wait for the driver to initialize
 	time.Sleep(2 * time.Second)
 })
+
+func probeMount() error {
+	dir, err := os.MkdirTemp("", "csi-sanity-mount-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(dir)
+
+	if err := syscall.Mount("tmpfs", dir, "tmpfs", 0, ""); err != nil {
+		if errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EACCES) {
+			return errors.New("mount not permitted on this system")
+		}
+		return err
+	}
+	_ = syscall.Unmount(dir, 0)
+	return nil
+}
 
 // AfterSuite to stop the CSI driver and clean up
 var _ = AfterSuite(func() {

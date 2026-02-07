@@ -16,6 +16,7 @@ import (
 )
 
 func TestNodeStageVolume(t *testing.T) {
+	skipIfNoMount(t)
 	n := node.NewNode("/tmp/test-csi.sock", "node-id")
 	go func() {
 		_ = n.Run()
@@ -144,9 +145,9 @@ func TestNodeStageVolume(t *testing.T) {
 				StagingTargetPath: tc.stagingPath,
 				VolumeCapability:  tc.volumeCapability,
 				VolumeContext: map[string]string{
-					"fileMode": tc.fileMode,
-					"source":   tc.source,
-					"fsType":   tc.fsType,
+					"fileMode":     tc.fileMode,
+					"source":       tc.source,
+					"fsType":       tc.fsType,
 					"mountOptions": tc.mountOptions,
 				},
 			}
@@ -185,6 +186,7 @@ func TestNodeStageVolume(t *testing.T) {
 }
 
 func TestNodeUnstageVolume(t *testing.T) {
+	skipIfNoMount(t)
 	n := node.NewNode("/tmp/test-csi.sock", "node-id")
 	go func() {
 		_ = n.Run()

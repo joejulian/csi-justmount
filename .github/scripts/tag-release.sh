@@ -82,6 +82,9 @@ PY
 
 if [[ -z "${next_version}" ]]; then
   echo "No release-worthy commits found."
+  if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+    echo "created=false" >> "${GITHUB_OUTPUT}"
+  fi
   exit 0
 fi
 
@@ -89,6 +92,9 @@ tag="v${next_version}"
 
 if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
   echo "Tag ${tag} already exists."
+  if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+    echo "created=false" >> "${GITHUB_OUTPUT}"
+  fi
   exit 0
 fi
 
@@ -110,3 +116,8 @@ git tag "${tag}"
 
 git push origin HEAD:main
 git push origin "${tag}"
+
+if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+  echo "created=true" >> "${GITHUB_OUTPUT}"
+  echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+fi

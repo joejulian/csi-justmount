@@ -43,14 +43,14 @@ docker_manifests:
       - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/justmount:{{ .Tag }}-amd64"
       - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/justmount:{{ .Tag }}-arm64"
 
-helm:
-  - name: justmount
-    chart: charts/justmount
-    version: "{{ .Version }}"
-    app_version: "{{ .Tag }}"
-    repository:
-      name: ghcr
-      url: "oci://ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/charts"
+before:
+  hooks:
+    - rm -f dist/justmount-*.tgz
+    - helm package charts/justmount --version {{ .Version }} --app-version {{ .Tag }} --destination dist
+
+after:
+  hooks:
+    - helm push dist/justmount-{{ .Version }}.tgz oci://ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/charts
 
 release:
   draft: false

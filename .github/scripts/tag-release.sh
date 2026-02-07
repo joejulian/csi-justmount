@@ -38,6 +38,13 @@ commits = [c.strip() for c in raw.split("==END==") if c.strip()]
 def is_release_commit(subject: str) -> bool:
     return bool(re.match(r"^chore\\(release\\):\\s*v?\\d+\\.\\d+\\.\\d+", subject))
 
+def parse_subject(subject: str):
+    # Conventional commits: type(scope)!: subject
+    m = re.match(r"^(?P<type>\\w+)(?:\\([^)]*\\))?(?P<breaking>!)?:\\s+", subject)
+    if not m:
+        return None, False
+    return m.group("type"), bool(m.group("breaking"))
+
 major = minor = patch = False
 for c in commits:
     lines = c.splitlines()
@@ -45,16 +52,16 @@ for c in commits:
     body = "\n".join(lines[1:])
     if is_release_commit(subject):
         continue
-    if "BREAKING CHANGE" in body:
+    ctype, breaking = parse_subject(subject)
+    if ctype not in {"feat", "fix", "perf"}:
+        continue
+    if breaking or "BREAKING CHANGE" in body:
         major = True
         continue
-    if re.match(r"^\\w+(\\([^)]*\\))?!: ", subject):
-        major = True
-        continue
-    if subject.startswith("feat"):
+    if ctype == "feat":
         minor = True
         continue
-    if subject.startswith("fix") or subject.startswith("perf"):
+    if ctype in {"fix", "perf"}:
         patch = True
 
 if not (major or minor or patch):

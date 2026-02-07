@@ -24,12 +24,14 @@ dockers:
       - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/justmount:{{ .Tag }}-amd64"
     use: buildx
     goarch: amd64
+    dockerfile: Dockerfile.goreleaser
     build_flag_templates:
       - "--platform=linux/amd64"
   - image_templates:
       - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/justmount:{{ .Tag }}-arm64"
     use: buildx
     goarch: arm64
+    dockerfile: Dockerfile.goreleaser
     build_flag_templates:
       - "--platform=linux/arm64"
 

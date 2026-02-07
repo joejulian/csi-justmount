@@ -9,6 +9,7 @@ node:
   hostNetwork: true
   privileged: true
   kubeletDir: /var/lib/kubelet
+  fuseDevice: /dev/fuse
 
 registrar:
   image: registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.15.0

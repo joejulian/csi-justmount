@@ -29,9 +29,13 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     steps:
-      - uses: googleapis/release-please-action@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
-          config-file: .release-please-config.json
-          manifest-file: .release-please-manifest.json
-          skip-github-pull-request: true
-          skip-github-release: true
+          fetch-depth: 0
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+      - name: Tag Release
+        run: ./.github/scripts/tag-release.sh

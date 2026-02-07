@@ -1,0 +1,21 @@
+.idea/
+.vscode/
+.DS_Store
+
+# Go build/test artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+coverage*.txt
+
+# Build outputs
+bin/
+dist/
+
+# Local tooling/temp
+tmp/
+*.tmp

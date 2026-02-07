@@ -1,0 +1,28 @@
+image:
+  repository: justmount
+  tag: dev
+  pullPolicy: IfNotPresent
+
+node:
+  endpoint: /csi/csi.sock
+  nodeIDEnv: KUBE_NODE_NAME
+  hostNetwork: true
+  privileged: true
+  kubeletDir: /var/lib/kubelet
+
+registrar:
+  image: registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.15.0
+  logLevel: 2
+
+serviceAccount:
+  create: true
+  name: justmount-node
+
+csidriver:
+  name: justmount.csi.driver
+
+resources: {}
+
+tolerations: []
+nodeSelector: {}
+affinity: {}

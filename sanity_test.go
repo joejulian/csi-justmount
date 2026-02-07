@@ -12,12 +12,10 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/joejulian/csi-justmount/pkg/controller"
 	"github.com/joejulian/csi-justmount/pkg/node"
 )
 
 const (
-	controllerEndpoint = "/tmp/csi-justmount-controller.sock"
 	nodeEndpoint       = "/tmp/csi-justmount-node.sock"
 )
 
@@ -26,6 +24,9 @@ func TestCSISanity(t *testing.T) {
 	suiteConfig, reporterConfig := GinkgoConfiguration()
 	// suiteConfig.FocusStrings = []string{"should fail when no node id is provided"}
 	suiteConfig.SkipStrings = []string{
+		// node-only driver; skip all controller tests
+		"[Controller Server]",
+
 		// require CreateVolume
 		"should fail when no volume capabilities are provided",
 		"should return appropriate values",
@@ -44,23 +45,12 @@ func TestCSISanity(t *testing.T) {
 }
 
 var (
-	c       *controller.Controller
 	n       *node.Node
 	tempDir string
 )
 
 // BeforeSuite to start the CSI driver
 var _ = BeforeSuite(func() {
-	// Start the CSI controller
-	c = controller.NewController(controllerEndpoint, true) // the test bool allows success to be returned from unimplemented capabilities to satisfy csi-test
-	go func() {
-		if err := c.Run(); err != nil {
-			log.Fatalf("Failed to run controller service: %v", err)
-		}
-	}()
-	// Wait for the driver to initialize
-	time.Sleep(2 * time.Second)
-
 	// Start the CSI node
 	n = node.NewNode("sanity-test-1", nodeEndpoint)
 	go func() {
@@ -76,7 +66,6 @@ var _ = BeforeSuite(func() {
 var _ = AfterSuite(func() {
 	// Stop the CSI driver
 	n.Stop()
-	c.Stop()
 	// Clean up temporary directories
 	if tempDir != "" {
 		os.RemoveAll(tempDir)
@@ -101,7 +90,6 @@ var _ = AfterEach(func() {
 func testConfig() *sanity.TestConfig {
 	config := sanity.NewTestConfig()
 	config.Address = nodeEndpoint
-	config.ControllerAddress = controllerEndpoint
 	return &config
 }
 

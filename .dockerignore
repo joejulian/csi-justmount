@@ -1,0 +1,9 @@
+.git
+.idea
+.vscode
+bin
+dist
+tmp
+*.test
+*.out
+coverage*.txt

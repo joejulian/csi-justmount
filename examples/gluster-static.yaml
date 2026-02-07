@@ -1,0 +1,57 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: justmount-static
+provisioner: justmount.csi.driver
+volumeBindingMode: Immediate
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: gluster-media-pv
+spec:
+  capacity:
+    storage: 100Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: justmount-static
+  csi:
+    driver: justmount.csi.driver
+    volumeHandle: gluster-media
+    volumeAttributes:
+      fsType: glusterfs
+      source: gluster:media
+      fileMode: "0755"
+      mountOptions: "rw,nosuid,nodev"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: gluster-media-pvc
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 100Gi
+  storageClassName: justmount-static
+  volumeName: gluster-media-pv
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: app-using-gluster
+spec:
+  containers:
+    - name: app
+      image: busybox
+      command: ["sh", "-c", "sleep 3600"]
+      volumeMounts:
+        - name: media
+          mountPath: /mnt/media
+          subPath: projects/2026
+  volumes:
+    - name: media
+      persistentVolumeClaim:
+        claimName: gluster-media-pvc

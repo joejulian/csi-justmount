@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -96,14 +97,16 @@ func TestRun(t *testing.T) {
 
 		// Expect an error because the directory is not writable
 		assert.Error(t, err, "Expected error due to invalid socket directory")
-		assert.Contains(t, err.Error(), "permission denied")
+		assert.True(t, strings.Contains(err.Error(), "permission denied") || strings.Contains(err.Error(), "operation not permitted"))
 	})
 }
 
 // TestControllerPublishVolume tests the ControllerPublishVolume method
 func TestControllerPublishVolume(t *testing.T) {
 	controller := controller.NewController("/tmp/test-csi.sock", false)
-	go controller.Run()
+	go func() {
+		_ = controller.Run()
+	}()
 	defer controller.Stop()
 
 	tests := []struct {

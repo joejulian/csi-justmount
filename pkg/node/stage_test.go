@@ -17,7 +17,9 @@ import (
 
 func TestNodeStageVolume(t *testing.T) {
 	n := node.NewNode("/tmp/test-csi.sock", "node-id")
-	go n.Run()
+	go func() {
+		_ = n.Run()
+	}()
 	defer n.Stop()
 	// Create a temporary staging directory
 	stagingPath, err := os.MkdirTemp("", "csi-staging-")
@@ -31,6 +33,8 @@ func TestNodeStageVolume(t *testing.T) {
 		volumeCapability *csi.VolumeCapability
 		fsType           string
 		fileMode         string
+		source           string
+		mountOptions     string
 		expectErrorCode  codes.Code
 		stagingPath      string
 	}{
@@ -49,6 +53,8 @@ func TestNodeStageVolume(t *testing.T) {
 			},
 			fsType:          "tmpfs",
 			fileMode:        "0755",
+			source:          "tmpfs",
+			mountOptions:    "rw",
 			expectErrorCode: codes.OK,
 			stagingPath:     stagingPath,
 		},
@@ -67,6 +73,7 @@ func TestNodeStageVolume(t *testing.T) {
 			},
 			fsType:          "tmpfs",
 			fileMode:        "", // Missing fileMode should trigger an error
+			source:          "tmpfs",
 			expectErrorCode: codes.InvalidArgument,
 			stagingPath:     stagingPath,
 		},
@@ -85,6 +92,7 @@ func TestNodeStageVolume(t *testing.T) {
 			},
 			fsType:          "tmpfs",
 			fileMode:        "invalid", // Invalid fileMode format should trigger an error
+			source:          "tmpfs",
 			expectErrorCode: codes.InvalidArgument,
 			stagingPath:     stagingPath,
 		},
@@ -103,8 +111,28 @@ func TestNodeStageVolume(t *testing.T) {
 			},
 			fsType:          "tmpfs",
 			fileMode:        "0755",
+			source:          "tmpfs",
 			expectErrorCode: codes.InvalidArgument,
 			stagingPath:     "",
+		},
+		{
+			name:     "Missing source in VolumeContext",
+			volumeID: "test-volume",
+			volumeCapability: &csi.VolumeCapability{
+				AccessType: &csi.VolumeCapability_Mount{
+					Mount: &csi.VolumeCapability_MountVolume{
+						FsType: "tmpfs",
+					},
+				},
+				AccessMode: &csi.VolumeCapability_AccessMode{
+					Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+				},
+			},
+			fsType:          "tmpfs",
+			fileMode:        "0755",
+			source:          "",
+			expectErrorCode: codes.InvalidArgument,
+			stagingPath:     stagingPath,
 		},
 	}
 
@@ -117,6 +145,9 @@ func TestNodeStageVolume(t *testing.T) {
 				VolumeCapability:  tc.volumeCapability,
 				VolumeContext: map[string]string{
 					"fileMode": tc.fileMode,
+					"source":   tc.source,
+					"fsType":   tc.fsType,
+					"mountOptions": tc.mountOptions,
 				},
 			}
 
@@ -155,7 +186,9 @@ func TestNodeStageVolume(t *testing.T) {
 
 func TestNodeUnstageVolume(t *testing.T) {
 	n := node.NewNode("/tmp/test-csi.sock", "node-id")
-	go n.Run()
+	go func() {
+		_ = n.Run()
+	}()
 	defer n.Stop()
 
 	// Create a temporary staging directory
@@ -223,7 +256,7 @@ func TestNodeUnstageVolume(t *testing.T) {
 			}
 
 			// Final cleanup: Attempt to unmount if still mounted
-			syscall.Unmount(stagingPath, 0)
+			_ = syscall.Unmount(stagingPath, 0)
 		})
 	}
 }

@@ -1,0 +1,56 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: justmount-static
+provisioner: justmount.csi.driver
+volumeBindingMode: Immediate
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: tmpfs-pv
+spec:
+  capacity:
+    storage: 1Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: justmount-static
+  csi:
+    driver: justmount.csi.driver
+    volumeHandle: tmpfs-volume
+    volumeAttributes:
+      fsType: tmpfs
+      source: tmpfs
+      fileMode: "0755"
+      mountOptions: "rw"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tmpfs-pvc
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: justmount-static
+  volumeName: tmpfs-pv
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: tmpfs-consumer
+spec:
+  containers:
+    - name: app
+      image: busybox
+      command: ["sh", "-c", "echo hello > /mnt/media/hello.txt && sleep 3600"]
+      volumeMounts:
+        - name: media
+          mountPath: /mnt/media
+  volumes:
+    - name: media
+      persistentVolumeClaim:
+        claimName: tmpfs-pvc

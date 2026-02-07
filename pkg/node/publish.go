@@ -33,6 +33,11 @@ func (n *Node) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolume
 		return nil, status.Error(codes.InvalidArgument, "staging_target_path is required")
 	}
 
+	// Ensure the target path exists
+	if err := os.MkdirAll(req.GetTargetPath(), 0755); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to create target path: %v", err)
+	}
+
 	// Ensure the staging path is a mount point
 	isMounted, err := util.IsMountPoint(req.GetStagingTargetPath())
 	if err != nil {

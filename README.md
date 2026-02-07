@@ -1,12 +1,11 @@
 
 # Justmount CSI Driver
 
-The **Justmount CSI Driver** is a Container Storage Interface (CSI) driver designed to provide basic storage management functionality to Kubernetes. This driver includes both Node and Controller services and supports essential CSI operations, such as mounting, unmounting, and basic volume lifecycle management.
+The **Justmount CSI Driver** is a Container Storage Interface (CSI) driver designed to provide basic storage management functionality to Kubernetes. This driver provides a Node service only and supports essential CSI node operations such as staging, publishing, unmounting, and unpublishing volumes.
 
 ## Features
 
 - **Node Service**: Manages node-local operations, including mounting and unmounting volumes.
-- **Controller Service**: Supports cluster-wide operations for volume creation, deletion, and attachment.
 - **CSI Compliance**: Compatible with Kubernetes and other orchestrators that support CSI.
 - **Sanity Testing**: Includes `csi-sanity` tests to validate CSI functionality and compliance.
 
@@ -34,14 +33,22 @@ This command will compile the driver binary as `bin/justmount`.
 
 Justmount supports configuration through command-line flags:
 
-- `--controller-endpoint`: Path to the Controller service socket (default: `/tmp/csi-controller.sock`)
 - `--node-endpoint`: Path to the Node service socket (default: `/tmp/csi-node.sock`)
 - `--node-id`: Unique identifier for each node (required for the Node service)
+
+### Volume Attributes
+
+When using static PVs, the driver expects the following `volumeAttributes` (from the PV `spec.csi.volumeAttributes`) for staging:
+
+- `source` (required): Source passed to the mount call (example: `gluster:media`)
+- `fsType` (optional if set in VolumeCapability): Filesystem type (example: `glusterfs`)
+- `mountOptions` (optional): Comma-separated mount options (example: `rw,nosuid,nodev`)
+- `fileMode` (required): Octal permissions to apply after staging (example: `0755`)
 
 ### Deploying on Kubernetes
 
 1. **Install the CSI Driver**:
-   Deploy the driver using appropriate Kubernetes resources (e.g., DaemonSets and Deployments) for the Controller and Node services. 
+   Deploy the driver using a DaemonSet for the Node service. 
 
 2. **Configure Storage Classes**:
    Set up a `StorageClass` that references the Justmount CSI driver:
@@ -56,7 +63,26 @@ Justmount supports configuration through command-line flags:
 
 ## Usage
 
-After deploying, you can create PersistentVolumeClaims (PVCs) that use the configured StorageClass. Justmount will automatically handle volume provisioning, attachment, mounting, and unmounting.
+After deploying, you can create PersistentVolumeClaims (PVCs) that use the configured StorageClass. Justmount will automatically handle volume attachment, mounting, and unmounting for existing volumes.
+
+### Local vs Network Filesystems
+
+For local filesystems, ensure pods are scheduled on the owning node by setting PV `nodeAffinity`.
+For network filesystems, omit `nodeAffinity` so pods can be scheduled anywhere.
+
+Example local PV node affinity:
+
+```yaml
+spec:
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: kubernetes.io/hostname
+          operator: In
+          values:
+          - <node-name>
+```
 
 ### Example PVC
 
@@ -95,10 +121,10 @@ This command will execute the `csi-sanity` tests configured in `sanity_test.go` 
    ```
 
 2. **Run the driver locally**:
-   Start the driver with both Controller and Node services:
+   Start the driver with the Node service:
 
    ```bash
-   ./bin/justmount --controller-endpoint /tmp/csi-controller.sock --node-endpoint /tmp/csi-node.sock --node-id <node-id>
+   ./bin/justmount --node-endpoint /tmp/csi-node.sock --node-id <node-id>
    ```
 
 ### Running Unit Tests

@@ -16,7 +16,9 @@ import (
 
 func TestNodePublishVolume(t *testing.T) {
 	n := node.NewNode("/tmp/test-csi.sock", "node-id")
-	go n.Run()
+	go func() {
+		_ = n.Run()
+	}()
 	defer n.Stop()
 
 	tests := []struct {
@@ -42,7 +44,7 @@ func TestNodePublishVolume(t *testing.T) {
 					Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
 				},
 			},
-			volumeContext:   map[string]string{"fileMode": "0755"},
+			volumeContext:   map[string]string{"fileMode": "0755", "source": "tmpfs"},
 			expectErrorCode: codes.OK,
 		},
 		{
@@ -51,7 +53,7 @@ func TestNodePublishVolume(t *testing.T) {
 			stagingPath:      "",
 			targetPath:       true,
 			volumeCapability: nil,
-			volumeContext:    map[string]string{"fileMode": "0755"},
+			volumeContext:    map[string]string{"fileMode": "0755", "source": "tmpfs"},
 			expectErrorCode:  codes.InvalidArgument,
 		},
 		{
@@ -67,7 +69,7 @@ func TestNodePublishVolume(t *testing.T) {
 					Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
 				},
 			},
-			volumeContext:   map[string]string{"fileMode": "0755"},
+			volumeContext:   map[string]string{"fileMode": "0755", "source": "tmpfs"},
 			targetPath:      false,
 			expectErrorCode: codes.InvalidArgument,
 		},
@@ -76,7 +78,7 @@ func TestNodePublishVolume(t *testing.T) {
 			volumeID:         "test-volume",
 			targetPath:       true,
 			volumeCapability: nil,
-			volumeContext:    map[string]string{"fileMode": "0755"},
+			volumeContext:    map[string]string{"fileMode": "0755", "source": "tmpfs"},
 			expectErrorCode:  codes.InvalidArgument,
 		},
 		{
@@ -168,8 +170,8 @@ func TestNodePublishVolume(t *testing.T) {
 			}
 
 			// Final cleanup: Unmount if mounted
-			syscall.Unmount(targetPath, 0)
-			syscall.Unmount(stagingPath, 0)
+			_ = syscall.Unmount(targetPath, 0)
+			_ = syscall.Unmount(stagingPath, 0)
 		})
 	}
 }

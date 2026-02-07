@@ -1,0 +1,16 @@
+{
+  "release-type": "go",
+  "include-v-in-tag": true,
+  "packages": {
+    ".": {
+      "component": "justmount",
+      "extra-files": [
+        {
+          "type": "yaml",
+          "path": "charts/justmount/Chart.yaml",
+          "jsonpath": "$.appVersion"
+        }
+      ]
+    }
+  }
+}

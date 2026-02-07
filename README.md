@@ -135,6 +135,18 @@ Run unit tests using:
 go test ./pkg/...
 ```
 
+### Task Runner
+
+This repo uses `just` for task orchestration. Common tasks:
+
+```bash
+just kind-build
+just kind-load
+just kind-deploy
+just kind-test
+just kind-clean
+```
+
 ### Directory Structure
 
 - `main.go`: Main entry point for the driver.

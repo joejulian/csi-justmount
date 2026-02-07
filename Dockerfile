@@ -13,7 +13,6 @@ FROM debian:bookworm-slim
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
       ca-certificates \
-      ceph-fuse \
       fuse3 \
       glusterfs-client \
       s3fs \

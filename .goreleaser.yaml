@@ -45,9 +45,10 @@ docker_manifests:
 
 before:
   hooks:
-    - rm -f dist/justmount-*.tgz
-    - helm package charts/justmount --version {{ .Version }} --app-version {{ .Tag }} --destination dist
-    - helm push dist/justmount-{{ .Version }}.tgz oci://ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/charts
+    - rm -rf /tmp/justmount-helm
+    - mkdir -p /tmp/justmount-helm
+    - helm package charts/justmount --version {{ .Version }} --app-version {{ .Tag }} --destination /tmp/justmount-helm
+    - helm push /tmp/justmount-helm/justmount-{{ .Version }}.tgz oci://ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/charts
 
 release:
   draft: false

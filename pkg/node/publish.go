@@ -7,7 +7,6 @@ import (
 	"syscall"
 
 	csi "github.com/container-storage-interface/spec/lib/go/csi"
-	"github.com/joejulian/csi-justmount/pkg/util"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -39,7 +38,7 @@ func (n *Node) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolume
 	}
 
 	// Ensure the staging path is a mount point
-	isMounted, err := util.IsMountPoint(req.GetStagingTargetPath())
+	isMounted, err := n.mounter.IsMountPoint(req.GetStagingTargetPath())
 	if err != nil {
 		log.Printf("failed to verify if staging path is a mount point: %v", err)
 		return nil, status.Errorf(codes.Internal, "failed to verify if staging path is a mount point: %v", err)
@@ -49,7 +48,7 @@ func (n *Node) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolume
 	}
 
 	// Perform a bind mount from the staging path to the target path
-	err = syscall.Mount(req.GetStagingTargetPath(), req.GetTargetPath(), "", syscall.MS_BIND, "")
+	err = n.mounter.Mount(req.GetStagingTargetPath(), req.GetTargetPath(), "", syscall.MS_BIND, "")
 	if err != nil {
 		log.Printf("failed to bind-mount volume from %s to %s: %v", req.GetStagingTargetPath(), req.GetTargetPath(), err)
 		return nil, status.Errorf(codes.Internal, "failed to bind-mount volume: %v", err)
@@ -71,7 +70,7 @@ func (n *Node) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublishVo
 	}
 
 	// Attempt to unmount the target path
-	err := syscall.Unmount(req.GetTargetPath(), 0)
+	err := n.mounter.Unmount(req.GetTargetPath(), 0)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to unmount target path: %v", err)
 	}

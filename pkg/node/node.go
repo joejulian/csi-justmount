@@ -16,6 +16,7 @@ type Node struct {
 	nodeID   string
 	endpoint string
 	server   *grpc.Server
+	mounter  Mounter
 
 	csi.UnimplementedNodeServer
 	csi.UnimplementedIdentityServer
@@ -26,6 +27,16 @@ func NewNode(nodeID, endpoint string) *Node {
 	return &Node{
 		nodeID:   nodeID,
 		endpoint: endpoint,
+		mounter:  SyscallMounter{},
+	}
+}
+
+// NewNodeWithMounter creates a new Node service with a custom mounter (for tests).
+func NewNodeWithMounter(nodeID, endpoint string, mounter Mounter) *Node {
+	return &Node{
+		nodeID:   nodeID,
+		endpoint: endpoint,
+		mounter:  mounter,
 	}
 }
 

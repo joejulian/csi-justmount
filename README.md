@@ -147,6 +147,12 @@ just kind-test
 just kind-clean
 ```
 
+### Release Notes
+
+Release automation uses Conventional Commits. Please use a conventional commit
+message for merge commits (squash-merge is recommended) so release-please can
+generate tags and changelogs.
+
 ### Directory Structure
 
 - `main.go`: Main entry point for the driver.

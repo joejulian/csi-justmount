@@ -1,0 +1,4 @@
+FROM gcr.io/distroless/static:latest
+COPY justmount /justmount
+USER 0:0
+ENTRYPOINT ["/justmount"]

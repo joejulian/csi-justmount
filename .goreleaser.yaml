@@ -47,9 +47,6 @@ before:
   hooks:
     - rm -f dist/justmount-*.tgz
     - helm package charts/justmount --version {{ .Version }} --app-version {{ .Tag }} --destination dist
-
-after:
-  hooks:
     - helm push dist/justmount-{{ .Version }}.tgz oci://ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/charts
 
 release:

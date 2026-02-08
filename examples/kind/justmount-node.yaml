@@ -20,6 +20,8 @@ metadata:
   name: justmount-node
   namespace: kube-system
 spec:
+  updateStrategy:
+    type: OnDelete
   selector:
     matchLabels:
       app: justmount-node

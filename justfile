@@ -20,5 +20,11 @@ kind-test:
 kind-clean:
   KUBECONFIG={{KUBECONFIG}} examples/kind/cleanup.sh
 
+test:
+  go test ./...
+
+install:
+  helm upgrade --install justmount ./charts/justmount --namespace justmount --create-namespace
+
 gen:
   go generate ./...

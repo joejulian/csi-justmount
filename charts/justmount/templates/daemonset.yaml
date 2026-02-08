@@ -4,6 +4,8 @@ metadata:
   name: {{ include "justmount.fullname" . }}
   namespace: {{ .Release.Namespace }}
 spec:
+  updateStrategy:
+    type: {{ .Values.node.updateStrategy }}
   selector:
     matchLabels:
       app: {{ include "justmount.fullname" . }}

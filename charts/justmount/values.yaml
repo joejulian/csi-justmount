@@ -1,6 +1,6 @@
 image:
-  repository: justmount
-  tag: dev
+  repository: ghcr.io/joejulian/justmount
+  tag: ""
   pullPolicy: IfNotPresent
 
 node:

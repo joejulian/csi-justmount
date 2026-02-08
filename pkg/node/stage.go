@@ -17,18 +17,25 @@ import (
 )
 
 func (n *Node) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequest) (*csi.NodeStageVolumeResponse, error) {
+	Logger(ctx).Info("NodeStageVolume start",
+		zap.String("volume_id", req.GetVolumeId()),
+		zap.String("staging_target_path", req.GetStagingTargetPath()),
+	)
 	// Check if volume_id is provided
 	if req.GetVolumeId() == "" {
+		Logger(ctx).Error("NodeStageVolume invalid argument: volume_id is required")
 		return nil, status.Error(codes.InvalidArgument, "volume_id is required")
 	}
 
 	// Check if staging_target_path is provided
 	if req.GetStagingTargetPath() == "" {
+		Logger(ctx).Error("NodeStageVolume invalid argument: staging_target_path is required")
 		return nil, status.Error(codes.InvalidArgument, "staging_target_path is required")
 	}
 
 	// Check if volume_capability is provided
 	if req.GetVolumeCapability() == nil {
+		Logger(ctx).Error("NodeStageVolume invalid argument: volume_capability is required")
 		return nil, status.Error(codes.InvalidArgument, "volume_capability is required")
 	}
 
@@ -44,16 +51,19 @@ func (n *Node) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequ
 		}
 	}
 	if fsType == "" {
+		Logger(ctx).Error("NodeStageVolume invalid argument: fsType is required")
 		return nil, status.Error(codes.InvalidArgument, "fsType is required in volume capability or volume context")
 	}
 
 	// Retrieve and apply file mode from VolumeContext; fileMode is required
 	modeStr, ok := req.GetVolumeContext()["fileMode"]
 	if !ok {
+		Logger(ctx).Error("NodeStageVolume invalid argument: fileMode is required")
 		return nil, status.Error(codes.InvalidArgument, "fileMode is a required parameter in VolumeContext")
 	}
 	mode, err := strconv.ParseUint(modeStr, 8, 32)
 	if err != nil {
+		Logger(ctx).Error("NodeStageVolume invalid argument: invalid fileMode", zap.Error(err))
 		return nil, status.Errorf(codes.InvalidArgument, "invalid file mode: %v", err)
 	}
 	fileMode := os.FileMode(mode)
@@ -61,18 +71,21 @@ func (n *Node) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequ
 	// Retrieve mount source from VolumeContext
 	source, ok := req.GetVolumeContext()["source"]
 	if !ok || source == "" {
+		Logger(ctx).Error("NodeStageVolume invalid argument: source is required")
 		return nil, status.Error(codes.InvalidArgument, "source is a required parameter in VolumeContext")
 	}
 
 	// Create the staging path if it doesn't exist
 	volumePath := req.GetStagingTargetPath()
 	if err := os.MkdirAll(volumePath, 0755); err != nil {
+		Logger(ctx).Error("NodeStageVolume failed to create staging path", zap.Error(err))
 		return nil, status.Errorf(codes.Internal, "failed to create staging path: %v", err)
 	}
 
 	// If already mounted, return success (idempotent)
 	isMounted, err := n.mounter.IsMountPoint(volumePath)
 	if err == nil && isMounted {
+		Logger(ctx).Info("NodeStageVolume already mounted")
 		return &csi.NodeStageVolumeResponse{}, nil
 	}
 
@@ -158,36 +171,46 @@ func (n *Node) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequ
 			)
 		}
 		return nil, status.Errorf(codes.Internal, "failed to mount volume (fsType=%q): %v", fsType, err)
-	}
+		}
 	}
 
 	// Re-apply file mode after mounting, as mount may override permissions
 	if err := os.Chmod(volumePath, fileMode); err != nil {
+		Logger(ctx).Error("NodeStageVolume failed to set file mode", zap.Error(err))
 		return nil, status.Errorf(codes.Internal, "failed to set file mode after mount: %v", err)
 	}
 
 	// Return success if mounting succeeded
+	Logger(ctx).Info("NodeStageVolume complete")
 	return &csi.NodeStageVolumeResponse{}, nil
 }
 
 func (n *Node) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstageVolumeRequest) (*csi.NodeUnstageVolumeResponse, error) {
+	Logger(ctx).Info("NodeUnstageVolume start",
+		zap.String("volume_id", req.GetVolumeId()),
+		zap.String("staging_target_path", req.GetStagingTargetPath()),
+	)
 	// Check if volume_id is provided
 	if req.GetVolumeId() == "" {
+		Logger(ctx).Error("NodeUnstageVolume invalid argument: volume_id is required")
 		return nil, status.Error(codes.InvalidArgument, "volume_id is required")
 	}
 
 	// Check if staging_target_path is provided
 	if req.GetStagingTargetPath() == "" {
+		Logger(ctx).Error("NodeUnstageVolume invalid argument: staging_target_path is required")
 		return nil, status.Error(codes.InvalidArgument, "staging_target_path is required")
 	}
 
 	// Attempt to unmount the staging target path
 	err := n.mounter.Unmount(req.GetStagingTargetPath(), 0)
 	if err != nil {
+		Logger(ctx).Error("NodeUnstageVolume failed to unmount staging target path", zap.Error(err))
 		return nil, status.Errorf(codes.Internal, "failed to unmount staging target path: %v", err)
 	}
 
 	// Return success response
+	Logger(ctx).Info("NodeUnstageVolume complete")
 	return &csi.NodeUnstageVolumeResponse{}, nil
 }
 

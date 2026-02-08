@@ -15,28 +15,38 @@ import (
 )
 
 func (n *Node) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolumeRequest) (*csi.NodePublishVolumeResponse, error) {
+	Logger(ctx).Info("NodePublishVolume start",
+		zap.String("volume_id", req.GetVolumeId()),
+		zap.String("staging_target_path", req.GetStagingTargetPath()),
+		zap.String("target_path", req.GetTargetPath()),
+	)
 	// Check if volume_id is provided
 	if req.GetVolumeId() == "" {
+		Logger(ctx).Error("NodePublishVolume invalid argument: volume_id is required")
 		return nil, status.Error(codes.InvalidArgument, "volume_id is required")
 	}
 
 	// Check if target_path is provided
 	if req.GetTargetPath() == "" {
+		Logger(ctx).Error("NodePublishVolume invalid argument: target_path is required")
 		return nil, status.Error(codes.InvalidArgument, "target_path is required")
 	}
 
 	// Check if volume_capability is provided
 	if req.GetVolumeCapability() == nil {
+		Logger(ctx).Error("NodePublishVolume invalid argument: volume_capability is required")
 		return nil, status.Error(codes.InvalidArgument, "volume_capability is required")
 	}
 
 	// Check if the staging path is provided, as required for bind-mounting
 	if req.GetStagingTargetPath() == "" {
+		Logger(ctx).Error("NodePublishVolume invalid argument: staging_target_path is required")
 		return nil, status.Error(codes.InvalidArgument, "staging_target_path is required")
 	}
 
 	// Ensure the target path exists
 	if err := os.MkdirAll(req.GetTargetPath(), 0755); err != nil {
+		Logger(ctx).Error("NodePublishVolume failed to create target path", zap.Error(err))
 		return nil, status.Errorf(codes.Internal, "failed to create target path: %v", err)
 	}
 
@@ -84,6 +94,7 @@ func (n *Node) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolume
 	}
 
 	// Return success response
+	Logger(ctx).Info("NodePublishVolume complete")
 	return &csi.NodePublishVolumeResponse{}, nil
 }
 
@@ -122,26 +133,35 @@ func unescapeMountPath(path string) string {
 
 
 func (n *Node) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublishVolumeRequest) (*csi.NodeUnpublishVolumeResponse, error) {
+	Logger(ctx).Info("NodeUnpublishVolume start",
+		zap.String("volume_id", req.GetVolumeId()),
+		zap.String("target_path", req.GetTargetPath()),
+	)
 	// Check if volume_id is provided
 	if req.GetVolumeId() == "" {
+		Logger(ctx).Error("NodeUnpublishVolume invalid argument: volume_id is required")
 		return nil, status.Error(codes.InvalidArgument, "volume_id is required")
 	}
 
 	// Check if target_path is provided
 	if req.GetTargetPath() == "" {
+		Logger(ctx).Error("NodeUnpublishVolume invalid argument: target_path is required")
 		return nil, status.Error(codes.InvalidArgument, "target_path is required")
 	}
 
 	// Attempt to unmount the target path
 	err := n.mounter.Unmount(req.GetTargetPath(), 0)
 	if err != nil {
+		Logger(ctx).Error("NodeUnpublishVolume failed to unmount target path", zap.Error(err))
 		return nil, status.Errorf(codes.Internal, "failed to unmount target path: %v", err)
 	}
 
 	// Attempt to remove the target path
 	if err := os.RemoveAll(req.GetTargetPath()); err != nil {
+		Logger(ctx).Error("NodeUnpublishVolume failed to remove target path", zap.Error(err))
 		return nil, status.Errorf(codes.Internal, "failed to remove target path: %v", err)
 	}
 
+	Logger(ctx).Info("NodeUnpublishVolume complete")
 	return &csi.NodeUnpublishVolumeResponse{}, nil
 }

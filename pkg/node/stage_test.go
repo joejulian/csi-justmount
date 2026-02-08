@@ -20,7 +20,11 @@ func TestNodeStageVolume(t *testing.T) {
 	stagingPath, err := os.MkdirTemp("", "csi-staging-")
 	assert.NoError(t, err, "Failed to create temp staging directory")
 
-	defer os.RemoveAll(stagingPath)
+	t.Cleanup(func() {
+		if err := os.RemoveAll(stagingPath); err != nil {
+			t.Fatalf("cleanup staging path: %v", err)
+		}
+	})
 
 	tests := []struct {
 		name             string
@@ -187,7 +191,11 @@ func TestNodeUnstageVolume(t *testing.T) {
 	stagingPath, err := os.MkdirTemp("", "csi-staging-")
 	assert.NoError(t, err, "Failed to create temp staging directory")
 
-	defer os.RemoveAll(stagingPath)
+	t.Cleanup(func() {
+		if err := os.RemoveAll(stagingPath); err != nil {
+			t.Fatalf("cleanup staging path: %v", err)
+		}
+	})
 
 	tests := []struct {
 		name              string

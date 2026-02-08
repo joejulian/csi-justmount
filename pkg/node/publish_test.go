@@ -100,11 +100,19 @@ func TestNodePublishVolume(t *testing.T) {
 			// Create temporary staging and publish directories
 			stagingPath, err := os.MkdirTemp("", "csi-staging-")
 			assert.NoError(t, err, "Failed to create temp staging directory")
-			defer os.RemoveAll(stagingPath)
+			t.Cleanup(func() {
+				if err := os.RemoveAll(stagingPath); err != nil {
+					t.Fatalf("cleanup staging path: %v", err)
+				}
+			})
 
 			targetPath, err := os.MkdirTemp("", "csi-publish-")
 			assert.NoError(t, err, "Failed to create temp publish directory")
-			defer os.RemoveAll(targetPath)
+			t.Cleanup(func() {
+				if err := os.RemoveAll(targetPath); err != nil {
+					t.Fatalf("cleanup target path: %v", err)
+				}
+			})
 
 			if !tc.targetPath {
 				targetPath = ""

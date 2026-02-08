@@ -232,7 +232,7 @@ func isNoSuchDevice(err error) bool {
 }
 
 func execMountHelper(fsType, source, target, opts string) (string, error) {
-	args := []string{"-v", "-t", fsType}
+		args := []string{"-t", fsType}
 	if strings.TrimSpace(opts) != "" {
 		args = append(args, "-o", opts)
 	}

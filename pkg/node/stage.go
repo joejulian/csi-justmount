@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"strconv"
@@ -111,12 +112,31 @@ func (n *Node) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequ
 	err = n.mounter.Mount(source, volumePath, fsType, flags, data)
 	if err != nil {
 		if isNoSuchDevice(err) {
+			log.Printf("mount failed with ENODEV (fsType=%q source=%q target=%q opts=%q), trying helper", fsType, source, volumePath, opts)
 			if execErr := mountHelper(fsType, source, volumePath, opts); execErr != nil {
-				return nil, status.Errorf(codes.Internal, "failed to mount volume: %v", execErr)
+				log.Printf("mount helper failed (fsType=%q source=%q target=%q opts=%q): %v", fsType, source, volumePath, opts, execErr)
+				return nil, status.Errorf(
+					codes.Internal,
+					"failed to mount volume (fsType=%q): syscall mount returned ENODEV and helper failed; ensure mount.%s is installed in the node image and /dev/fuse is available, or ensure kernel support for %s. helper error: %v",
+					fsType,
+					fsType,
+					fsType,
+					execErr,
+				)
 			}
-		} else {
-			return nil, status.Errorf(codes.Internal, "failed to mount volume: %v", err)
+			log.Printf("mount helper succeeded (fsType=%q source=%q target=%q opts=%q)", fsType, source, volumePath, opts)
+	} else {
+		log.Printf("mount failed (fsType=%q source=%q target=%q opts=%q): %v", fsType, source, volumePath, opts, err)
+		if isPermissionError(err) {
+			return nil, status.Errorf(
+				codes.Internal,
+				"failed to mount volume (fsType=%q): permission denied; ensure the node plugin has CAP_SYS_ADMIN (or privileged), and /dev/fuse is available for FUSE filesystems. mount error: %v",
+				fsType,
+				err,
+			)
 		}
+		return nil, status.Errorf(codes.Internal, "failed to mount volume (fsType=%q): %v", fsType, err)
+	}
 	}
 
 	// Re-apply file mode after mounting, as mount may override permissions
@@ -165,9 +185,20 @@ func execMountHelper(fsType, source, target, opts string) error {
 	cmd := exec.Command("mount", args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		if errors.Is(err, exec.ErrNotFound) {
+			return fmt.Errorf("mount helper not found in PATH (mount/mount.%s): %w", fsType, err)
+		}
 		return fmt.Errorf("mount helper failed: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }
 
 var mountHelper = execMountHelper
+
+func isPermissionError(err error) bool {
+	if errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EACCES) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "permission denied") || strings.Contains(msg, "operation not permitted")
+}

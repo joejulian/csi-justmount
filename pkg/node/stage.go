@@ -232,20 +232,33 @@ func isNoSuchDevice(err error) bool {
 }
 
 func execMountHelper(fsType, source, target, opts string) (string, error) {
-		args := []string{"-t", fsType}
+	helper := "mount." + fsType
+	helperPath, err := exec.LookPath(helper)
+	if err != nil {
+		if alt := "/sbin/" + helper; fileExists(alt) {
+			helperPath = alt
+		} else if alt := "/usr/sbin/" + helper; fileExists(alt) {
+			helperPath = alt
+		} else {
+			return "", fmt.Errorf("mount helper not found in PATH or /sbin:/usr/sbin (%s)", helper)
+		}
+	}
+
+	args := []string{"-x", helperPath, source, target}
 	if strings.TrimSpace(opts) != "" {
 		args = append(args, "-o", opts)
 	}
-	args = append(args, source, target)
-	cmd := exec.Command("mount", args...)
+	cmd := exec.Command("sh", args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		if errors.Is(err, exec.ErrNotFound) {
-			return strings.TrimSpace(string(out)), fmt.Errorf("mount helper not found in PATH (mount/mount.%s): %w", fsType, err)
-		}
 		return strings.TrimSpace(string(out)), fmt.Errorf("mount helper failed: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 func logMountInfo(ctx context.Context, path, message string) {

@@ -2,11 +2,11 @@ package node
 
 import (
 	"context"
-	"log"
 	"net"
 	"os"
 
 	csi "github.com/container-storage-interface/spec/lib/go/csi"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
 )
@@ -52,7 +52,7 @@ func (n *Node) Run() error {
 		return err
 	}
 
-	n.server = grpc.NewServer()
+	n.server = grpc.NewServer(grpc.UnaryInterceptor(unaryLoggingInterceptor(n.nodeID)))
 
 	// Register the Node service
 	csi.RegisterNodeServer(n.server, n)
@@ -61,7 +61,7 @@ func (n *Node) Run() error {
 	// Register reflection service for debugging
 	reflection.Register(n.server)
 
-	log.Printf("Starting Node gRPC server on %s", n.endpoint)
+	BaseLogger().Info("starting node gRPC server", zap.String("endpoint", n.endpoint), zap.String("node_id", n.nodeID))
 	if err := n.server.Serve(listener); err != nil {
 		return err
 	}

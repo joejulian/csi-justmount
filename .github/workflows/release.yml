@@ -1,9 +1,7 @@
 name: Release
 
 on:
-  workflow_run:
-    workflows: ["Release Tag"]
-    types: [completed]
+  push:
     branches: [main]
 
 permissions:
@@ -11,50 +9,72 @@ permissions:
   packages: write
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+      - name: Test
+        run: go test ./...
+
+  tag:
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      created: ${{ steps.tag.outputs.created }}
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+      - name: Tag Release
+        id: tag
+        run: ./.github/scripts/tag-release.sh
+
   goreleaser:
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    needs: tag
+    if: ${{ needs.tag.outputs.created == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Resolve Release Tag
-        id: resolve
+      - name: Checkout Tag
         run: |
           git fetch --tags --force
-          tag="$(git tag --points-at HEAD --list "v*" | head -n1)"
-          if [[ -z "${tag}" ]]; then
-            echo "No release tag found on HEAD; skipping GoReleaser."
-            echo "tag=" >> "${GITHUB_OUTPUT}"
-            exit 0
-          fi
-          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
-          git checkout "refs/tags/${tag}"
+          git checkout "refs/tags/${{ needs.tag.outputs.tag }}"
       - name: Setup Go
-        if: steps.resolve.outputs.tag != ''
         uses: actions/setup-go@v5
         with:
           go-version: "1.24.x"
       - name: Setup Docker Buildx
-        if: steps.resolve.outputs.tag != ''
         uses: docker/setup-buildx-action@v3
       - name: Login to GHCR
-        if: steps.resolve.outputs.tag != ''
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Setup Helm
-        if: steps.resolve.outputs.tag != ''
         uses: azure/setup-helm@v4
       - name: Login to Helm Registry
-        if: steps.resolve.outputs.tag != ''
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
       - name: Run GoReleaser
-        if: steps.resolve.outputs.tag != ''
         uses: goreleaser/goreleaser-action@v6
         with:
           version: "v2.13.3"

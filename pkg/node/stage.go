@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"strconv"
@@ -12,6 +11,7 @@ import (
 	"syscall"
 
 	csi "github.com/container-storage-interface/spec/lib/go/csi"
+	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -112,9 +112,20 @@ func (n *Node) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequ
 	err = n.mounter.Mount(source, volumePath, fsType, flags, data)
 	if err != nil {
 		if isNoSuchDevice(err) {
-			log.Printf("mount failed with ENODEV (fsType=%q source=%q target=%q opts=%q), trying helper", fsType, source, volumePath, opts)
+			Logger(ctx).Info("mount failed with ENODEV, trying helper",
+				zap.String("fs_type", fsType),
+				zap.String("source", source),
+				zap.String("target", volumePath),
+				zap.String("opts", opts),
+			)
 			if execErr := mountHelper(fsType, source, volumePath, opts); execErr != nil {
-				log.Printf("mount helper failed (fsType=%q source=%q target=%q opts=%q): %v", fsType, source, volumePath, opts, execErr)
+				Logger(ctx).Error("mount helper failed",
+					zap.String("fs_type", fsType),
+					zap.String("source", source),
+					zap.String("target", volumePath),
+					zap.String("opts", opts),
+					zap.Error(execErr),
+				)
 				return nil, status.Errorf(
 					codes.Internal,
 					"failed to mount volume (fsType=%q): syscall mount returned ENODEV and helper failed; ensure mount.%s is installed in the node image and /dev/fuse is available, or ensure kernel support for %s. helper error: %v",
@@ -124,12 +135,23 @@ func (n *Node) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequ
 					execErr,
 				)
 			}
-			log.Printf("mount helper succeeded (fsType=%q source=%q target=%q opts=%q)", fsType, source, volumePath, opts)
-	} else {
-		log.Printf("mount failed (fsType=%q source=%q target=%q opts=%q): %v", fsType, source, volumePath, opts, err)
-		if isPermissionError(err) {
-			return nil, status.Errorf(
-				codes.Internal,
+			Logger(ctx).Info("mount helper succeeded",
+				zap.String("fs_type", fsType),
+				zap.String("source", source),
+				zap.String("target", volumePath),
+				zap.String("opts", opts),
+			)
+		} else {
+			Logger(ctx).Error("mount failed",
+				zap.String("fs_type", fsType),
+				zap.String("source", source),
+				zap.String("target", volumePath),
+				zap.String("opts", opts),
+				zap.Error(err),
+			)
+			if isPermissionError(err) {
+				return nil, status.Errorf(
+					codes.Internal,
 				"failed to mount volume (fsType=%q): permission denied; ensure the node plugin has CAP_SYS_ADMIN (or privileged), and /dev/fuse is available for FUSE filesystems. mount error: %v",
 				fsType,
 				err,

@@ -19,38 +19,25 @@ archives:
 checksum:
   name_template: "checksums.txt"
 
-dockers:
-  - image_templates:
-      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/justmount:{{ .Tag }}-amd64"
-    use: buildx
-    goarch: amd64
+dockers_v2:
+  - id: justmount
     dockerfile: Dockerfile.goreleaser
-    build_flag_templates:
-      - "--platform=linux/amd64"
-  - image_templates:
-      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/justmount:{{ .Tag }}-arm64"
-    use: buildx
-    goarch: arm64
-    dockerfile: Dockerfile.goreleaser
-    build_flag_templates:
-      - "--platform=linux/arm64"
-
-docker_manifests:
-  - name_template: "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/justmount:{{ .Tag }}"
-    image_templates:
-      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/justmount:{{ .Tag }}-amd64"
-      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/justmount:{{ .Tag }}-arm64"
-  - name_template: "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/justmount:latest"
-    image_templates:
-      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/justmount:{{ .Tag }}-amd64"
-      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/justmount:{{ .Tag }}-arm64"
+    ids:
+      - justmount
+    images:
+      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/justmount"
+    tags:
+      - "{{ .Tag }}"
+      - "{{ if not .IsSnapshot }}latest{{ end }}"
+    platforms:
+      - linux/amd64
+      - linux/arm64
 
 before:
   hooks:
     - rm -rf /tmp/justmount-helm
     - mkdir -p /tmp/justmount-helm
-    - helm package charts/justmount --version {{ .Version }} --app-version {{ .Tag }} --destination /tmp/justmount-helm
-    - helm push /tmp/justmount-helm/justmount-{{ .Version }}.tgz oci://ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/charts
+    - .github/scripts/helm-package-push.sh {{ .Version }} {{ .Tag }}
 
 release:
   draft: false

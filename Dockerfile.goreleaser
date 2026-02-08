@@ -1,4 +1,5 @@
 FROM debian:bookworm-slim
+ARG TARGETPLATFORM
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
       ca-certificates \
@@ -7,6 +8,6 @@ RUN apt-get update && \
       s3fs \
       sshfs && \
     rm -rf /var/lib/apt/lists/*
-COPY justmount /justmount
+COPY ${TARGETPLATFORM}/justmount /justmount
 USER 0:0
 ENTRYPOINT ["/justmount"]

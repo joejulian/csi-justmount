@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	csi "github.com/container-storage-interface/spec/lib/go/csi"
 	"go.uber.org/zap"
@@ -131,12 +132,14 @@ func (n *Node) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequ
 				zap.String("target", volumePath),
 				zap.String("opts", opts),
 			)
-			if execErr := mountHelper(fsType, source, volumePath, opts); execErr != nil {
+			out, execErr := mountHelper(fsType, source, volumePath, opts)
+			if execErr != nil {
 				Logger(ctx).Error("mount helper failed",
 					zap.String("fs_type", fsType),
 					zap.String("source", source),
 					zap.String("target", volumePath),
 					zap.String("opts", opts),
+					zap.String("output", out),
 					zap.Error(execErr),
 				)
 				return nil, status.Errorf(
@@ -153,7 +156,11 @@ func (n *Node) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequ
 				zap.String("source", source),
 				zap.String("target", volumePath),
 				zap.String("opts", opts),
+				zap.String("output", out),
 			)
+			logMountInfo(ctx, volumePath, "mountinfo after helper")
+			time.Sleep(1 * time.Second)
+			logMountInfo(ctx, volumePath, "mountinfo after helper delay")
 		} else {
 			Logger(ctx).Error("mount failed",
 				zap.String("fs_type", fsType),
@@ -165,14 +172,17 @@ func (n *Node) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequ
 			if isPermissionError(err) {
 				return nil, status.Errorf(
 					codes.Internal,
-				"failed to mount volume (fsType=%q): permission denied; ensure the node plugin has CAP_SYS_ADMIN (or privileged), and /dev/fuse is available for FUSE filesystems. mount error: %v",
-				fsType,
-				err,
-			)
-		}
-		return nil, status.Errorf(codes.Internal, "failed to mount volume (fsType=%q): %v", fsType, err)
+					"failed to mount volume (fsType=%q): permission denied; ensure the node plugin has CAP_SYS_ADMIN (or privileged), and /dev/fuse is available for FUSE filesystems. mount error: %v",
+					fsType,
+					err,
+				)
+			}
+			return nil, status.Errorf(codes.Internal, "failed to mount volume (fsType=%q): %v", fsType, err)
 		}
 	}
+	logMountInfo(ctx, volumePath, "mountinfo after syscall mount")
+	time.Sleep(1 * time.Second)
+	logMountInfo(ctx, volumePath, "mountinfo after syscall mount delay")
 
 	// Re-apply file mode after mounting, as mount may override permissions
 	if err := os.Chmod(volumePath, fileMode); err != nil {
@@ -221,8 +231,8 @@ func isNoSuchDevice(err error) bool {
 	return strings.Contains(strings.ToLower(err.Error()), "no such device")
 }
 
-func execMountHelper(fsType, source, target, opts string) error {
-	args := []string{"-t", fsType}
+func execMountHelper(fsType, source, target, opts string) (string, error) {
+	args := []string{"-v", "-t", fsType}
 	if strings.TrimSpace(opts) != "" {
 		args = append(args, "-o", opts)
 	}
@@ -231,11 +241,41 @@ func execMountHelper(fsType, source, target, opts string) error {
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		if errors.Is(err, exec.ErrNotFound) {
-			return fmt.Errorf("mount helper not found in PATH (mount/mount.%s): %w", fsType, err)
+			return strings.TrimSpace(string(out)), fmt.Errorf("mount helper not found in PATH (mount/mount.%s): %w", fsType, err)
 		}
-		return fmt.Errorf("mount helper failed: %w: %s", err, strings.TrimSpace(string(out)))
+		return strings.TrimSpace(string(out)), fmt.Errorf("mount helper failed: %w: %s", err, strings.TrimSpace(string(out)))
 	}
-	return nil
+	return strings.TrimSpace(string(out)), nil
+}
+
+func logMountInfo(ctx context.Context, path, message string) {
+	if line, ok := findMountInfoLine(path); ok {
+		Logger(ctx).Info(message, zap.String("path", path), zap.String("mountinfo", line))
+		return
+	}
+	Logger(ctx).Info(message+": path not found in mountinfo",
+		zap.String("path", path),
+		zap.Strings("mountinfo_sample", mountInfoSample(8)),
+	)
+}
+
+func mountInfoSample(limit int) []string {
+	data, err := os.ReadFile("/proc/self/mountinfo")
+	if err != nil {
+		return []string{fmt.Sprintf("read mountinfo failed: %v", err)}
+	}
+	lines := strings.Split(string(data), "\n")
+	var out []string
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		out = append(out, line)
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out
 }
 
 var mountHelper = execMountHelper

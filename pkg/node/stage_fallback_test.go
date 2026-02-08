@@ -32,12 +32,12 @@ func TestNodeStageVolumeExecFallback(t *testing.T) {
 
 	var gotType, gotSource, gotTarget, gotOpts string
 	origHelper := mountHelper
-	mountHelper = func(fsType, source, target, opts string) error {
+	mountHelper = func(fsType, source, target, opts string) (string, error) {
 		gotType = fsType
 		gotSource = source
 		gotTarget = target
 		gotOpts = opts
-		return nil
+		return "ok", nil
 	}
 	t.Cleanup(func() { mountHelper = origHelper })
 
@@ -72,9 +72,9 @@ func TestNodeStageVolumeNoExecFallbackOnOtherError(t *testing.T) {
 
 	origHelper := mountHelper
 	called := false
-	mountHelper = func(fsType, source, target, opts string) error {
+	mountHelper = func(fsType, source, target, opts string) (string, error) {
 		called = true
-		return nil
+		return "", nil
 	}
 	t.Cleanup(func() { mountHelper = origHelper })
 

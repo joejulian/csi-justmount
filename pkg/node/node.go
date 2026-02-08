@@ -76,8 +76,8 @@ func (n *Node) Stop() {
 
 // NodeGetCapabilities is a stub implementation to get node capabilities
 func (n *Node) NodeGetCapabilities(ctx context.Context, req *csi.NodeGetCapabilitiesRequest) (*csi.NodeGetCapabilitiesResponse, error) {
-	// TODO: Implement capability reporting logic
-	return &csi.NodeGetCapabilitiesResponse{
+	Logger(ctx).Info("NodeGetCapabilities start")
+	resp := &csi.NodeGetCapabilitiesResponse{
 		Capabilities: []*csi.NodeServiceCapability{
 			{
 				Type: &csi.NodeServiceCapability_Rpc{
@@ -87,22 +87,34 @@ func (n *Node) NodeGetCapabilities(ctx context.Context, req *csi.NodeGetCapabili
 				},
 			},
 		},
-	}, nil
+	}
+	Logger(ctx).Info("node capabilities", zap.Any("capabilities", resp.Capabilities))
+	Logger(ctx).Info("NodeGetCapabilities complete")
+	return resp, nil
 }
 
 func (n *Node) GetPluginCapabilities(ctx context.Context, req *csi.GetPluginCapabilitiesRequest) (*csi.GetPluginCapabilitiesResponse, error) {
-	return &csi.GetPluginCapabilitiesResponse{
-		Capabilities: []*csi.PluginCapability{}}, nil
+	Logger(ctx).Info("GetPluginCapabilities start")
+	resp := &csi.GetPluginCapabilitiesResponse{
+		Capabilities: []*csi.PluginCapability{},
+	}
+	Logger(ctx).Info("GetPluginCapabilities complete", zap.Any("capabilities", resp.Capabilities))
+	return resp, nil
 }
 
 func (n *Node) Probe(ctx context.Context, req *csi.ProbeRequest) (*csi.ProbeResponse, error) {
-	// Indicate the plugin is ready
-	return &csi.ProbeResponse{}, nil
+	Logger(ctx).Info("Probe start")
+	resp := &csi.ProbeResponse{}
+	Logger(ctx).Info("Probe complete")
+	return resp, nil
 }
 
 func (n *Node) GetPluginInfo(ctx context.Context, req *csi.GetPluginInfoRequest) (*csi.GetPluginInfoResponse, error) {
-	return &csi.GetPluginInfoResponse{
+	Logger(ctx).Info("GetPluginInfo start")
+	resp := &csi.GetPluginInfoResponse{
 		Name:          "justmount.csi.driver", // Unique name for your CSI driver
 		VendorVersion: "0.0.1",                // Driver version
-	}, nil
+	}
+	Logger(ctx).Info("GetPluginInfo complete", zap.String("name", resp.Name), zap.String("version", resp.VendorVersion))
+	return resp, nil
 }

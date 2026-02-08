@@ -84,7 +84,9 @@ var _ = AfterSuite(func() {
 	}
 	// Clean up temporary directories
 	if tempDir != "" {
-		os.RemoveAll(tempDir)
+		if err := os.RemoveAll(tempDir); err != nil {
+			log.Printf("failed to remove tempDir: %v", err)
+		}
 	}
 })
 
@@ -172,7 +174,9 @@ var _ = BeforeEach(func() {
 // Clean up temporary directories after each test
 var _ = AfterEach(func() {
 	if tempDir != "" {
-		os.RemoveAll(tempDir)
+		if err := os.RemoveAll(tempDir); err != nil {
+			log.Printf("failed to remove tempDir: %v", err)
+		}
 		tempDir = ""
 	}
 })

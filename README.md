@@ -47,8 +47,25 @@ When using static PVs, the driver expects the following `volumeAttributes` (from
 
 ### Deploying on Kubernetes
 
-1. **Install the CSI Driver**:
-   Deploy the driver using a DaemonSet for the Node service. 
+1. **Install the CSI Driver (Helm)**:
+
+   From the repo:
+
+   ```bash
+   helm install justmount ./charts/justmount --namespace kube-system
+   ```
+
+   From GHCR (OCI):
+
+   ```bash
+   helm install justmount oci://ghcr.io/<owner>/charts/justmount --namespace kube-system
+   ```
+
+   Key values:
+   - `image.repository`
+   - `image.tag` (defaults to chart `appVersion`)
+   - `node.kubeletDir`
+   - `node.updateStrategy` (defaults to `OnDelete` to avoid rolling FUSE mounts)
 
 2. **Configure Storage Classes**:
    Set up a `StorageClass` that references the Justmount CSI driver:
@@ -69,6 +86,11 @@ After deploying, you can create PersistentVolumeClaims (PVCs) that use the confi
 
 For local filesystems, ensure pods are scheduled on the owning node by setting PV `nodeAffinity`.
 For network filesystems, omit `nodeAffinity` so pods can be scheduled anywhere.
+
+### FUSE Mount Options
+
+Some mount options are not supported by FUSE filesystems and may cause mounts to fail without a clear error.
+If a FUSE mount fails unexpectedly, check `dmesg` on the node for the kernel-side error and remove unsupported options.
 
 Example local PV node affinity:
 
@@ -102,13 +124,13 @@ spec:
 
 ## Testing
 
-To validate the driver’s functionality and compliance, run the following command:
+Run the test suite with `just`:
 
 ```bash
-ginkgo ./...
+just test
 ```
 
-This command will execute the `csi-sanity` tests configured in `sanity_test.go` as well as any other unit tests.
+This runs `go test ./...`, including the `csi-sanity` tests configured in `sanity_test.go`.
 
 ## Development
 
@@ -140,6 +162,7 @@ go test ./pkg/...
 This repo uses `just` for task orchestration. Common tasks:
 
 ```bash
+just install
 just kind-build
 just kind-load
 just kind-deploy

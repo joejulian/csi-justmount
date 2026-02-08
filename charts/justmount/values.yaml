@@ -10,6 +10,7 @@ node:
   privileged: true
   kubeletDir: /var/lib/kubelet
   fuseDevice: /dev/fuse
+  updateStrategy: OnDelete
 
 registrar:
   image: registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.15.0

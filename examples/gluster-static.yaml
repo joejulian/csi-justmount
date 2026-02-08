@@ -23,7 +23,7 @@ spec:
       fsType: glusterfs
       source: gluster:media
       fileMode: "0755"
-      mountOptions: "rw,nosuid,nodev"
+      mountOptions: "rw"
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim

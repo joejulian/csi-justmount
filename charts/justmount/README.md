@@ -27,7 +27,7 @@ helm install justmount oci://ghcr.io/<owner>/charts/justmount --namespace kube-s
 Key values (see `values.yaml` for the full list):
 
 - `image.repository`
-- `image.tag`
+- `image.tag` (defaults to `appVersion` when empty)
 - `node.endpoint`
 - `node.kubeletDir`
 - `csidriver.name`

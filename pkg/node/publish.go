@@ -149,15 +149,56 @@ func (n *Node) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublishVo
 		return nil, status.Error(codes.InvalidArgument, "target_path is required")
 	}
 
-	// Attempt to unmount the target path
-	err := n.mounter.Unmount(req.GetTargetPath(), 0)
-	if err != nil {
-		Logger(ctx).Error("NodeUnpublishVolume failed to unmount target path", zap.Error(err))
-		return nil, status.Errorf(codes.Internal, "failed to unmount target path: %v", err)
+	targetPath := filepath.Clean(req.GetTargetPath())
+	if targetPath == "/" || targetPath == "." {
+		Logger(ctx).Error("NodeUnpublishVolume invalid argument: unsafe target path",
+			zap.String("target_path", req.GetTargetPath()),
+			zap.String("cleaned_target_path", targetPath),
+		)
+		return nil, status.Error(codes.InvalidArgument, "unsafe target_path")
 	}
 
-	// Attempt to remove the target path
-	if err := os.RemoveAll(req.GetTargetPath()); err != nil {
+	// Unmount all stacked mount layers at this path.
+	for i := 0; i < 10; i++ {
+		isMounted, err := n.mounter.IsMountPoint(targetPath)
+		if err != nil {
+			Logger(ctx).Error("NodeUnpublishVolume failed to check mountpoint",
+				zap.String("target_path", targetPath),
+				zap.Error(err),
+			)
+			return nil, status.Errorf(codes.Internal, "failed to verify target path mountpoint: %v", err)
+		}
+		if !isMounted {
+			break
+		}
+
+		err = n.mounter.Unmount(targetPath, 0)
+		if err != nil {
+			Logger(ctx).Error("NodeUnpublishVolume failed to unmount target path",
+				zap.String("target_path", targetPath),
+				zap.Int("attempt", i+1),
+				zap.Error(err),
+			)
+			return nil, status.Errorf(codes.Internal, "failed to unmount target path: %v", err)
+		}
+	}
+
+	// Ensure no mount remains before removing the target directory.
+	if isMounted, err := n.mounter.IsMountPoint(targetPath); err != nil {
+		Logger(ctx).Error("NodeUnpublishVolume failed final mountpoint check",
+			zap.String("target_path", targetPath),
+			zap.Error(err),
+		)
+		return nil, status.Errorf(codes.Internal, "failed to verify target path mountpoint: %v", err)
+	} else if isMounted {
+		Logger(ctx).Error("NodeUnpublishVolume mountpoint still present after unmount attempts",
+			zap.String("target_path", targetPath),
+		)
+		return nil, status.Error(codes.Internal, "target_path remains mounted after unmount attempts")
+	}
+
+	// Never recurse during cleanup. target_path should be an empty directory.
+	if err := os.Remove(targetPath); err != nil && !os.IsNotExist(err) {
 		Logger(ctx).Error("NodeUnpublishVolume failed to remove target path", zap.Error(err))
 		return nil, status.Errorf(codes.Internal, "failed to remove target path: %v", err)
 	}

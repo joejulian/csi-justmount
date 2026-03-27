@@ -1,0 +1,38 @@
+{
+  extends: [
+    "config:recommended",
+    ":dependencyDashboard",
+    ":semanticCommits",
+    ":separateMajorReleases",
+  ],
+  labels: ["dependencies"],
+  automergeType: "pr",
+  platformAutomerge: true,
+  prHourlyLimit: 0,
+  prConcurrentLimit: 0,
+  branchConcurrentLimit: 0,
+  rebaseWhen: "behind-base-branch",
+  packageRules: [
+    {
+      matchManagers: ["github-actions", "gomod", "dockerfile"],
+      automerge: true,
+      addLabels: ["automerge"],
+    },
+    {
+      matchDatasources: ["docker"],
+      matchManagers: ["custom.regex"],
+      automerge: true,
+      addLabels: ["automerge"],
+    },
+  ],
+  customManagers: [
+    {
+      customType: "regex",
+      managerFilePatterns: ["/^charts\\/justmount\\/values\\.ya?ml$/"],
+      matchStrings: [
+        "# renovate: image=(?<depName>[^\\s]+)\\n\\s*image:\\s*[\"']?(?<currentValue>[^\"'\\n]+)[\"']?",
+      ],
+      datasourceTemplate: "docker",
+    },
+  ],
+}

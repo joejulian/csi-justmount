@@ -23,7 +23,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: gh pr merge --repo "${{ github.repository }}" --auto --rebase "${PR_NUMBER}"
+        run: |
+          if ! gh pr merge --repo "${{ github.repository }}" --auto --rebase "${PR_NUMBER}"; then
+            gh pr merge --repo "${{ github.repository }}" --rebase "${PR_NUMBER}"
+          fi
       - name: Enable automerge for open Renovate PRs
         if: ${{ github.event_name == 'workflow_dispatch' }}
         env:
@@ -34,5 +37,7 @@ jobs:
             --jq '.[] | select((.headRefName | startswith("renovate/")) and (.isDraft | not) and ((.labels | map(.name) | index("automerge")) != null)) | .number' \
             | while read -r pr; do
                 [[ -n "${pr}" ]] || continue
-                gh pr merge --repo "${REPO}" --auto --rebase "${pr}"
+                if ! gh pr merge --repo "${REPO}" --auto --rebase "${pr}"; then
+                  gh pr merge --repo "${REPO}" --rebase "${pr}"
+                fi
               done

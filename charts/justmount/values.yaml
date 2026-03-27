@@ -13,6 +13,7 @@ node:
   updateStrategy: OnDelete
 
 registrar:
+  # renovate: image=registry.k8s.io/sig-storage/csi-node-driver-registrar
   image: registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.15.0
   logLevel: 2
 

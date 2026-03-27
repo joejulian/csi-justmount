@@ -32,7 +32,14 @@ log_range = "${log_range}"
 def git(*args: str) -> str:
     return subprocess.check_output(["git", *args], text=True)
 
-raw = git("log", log_range, "--no-merges", "--format=%s%n%b%n==END==")
+def changed_files(commit_text: str) -> list[str]:
+    lines = commit_text.splitlines()
+    if not lines:
+        return []
+    sha = lines[0].strip()
+    return [line.strip() for line in git("show", "--format=", "--name-only", sha).splitlines() if line.strip()]
+
+raw = git("log", log_range, "--no-merges", "--format=%H%n%s%n%b%n==END==")
 commits = [c.strip() for c in raw.split("==END==") if c.strip()]
 
 def is_release_commit(subject: str) -> bool:
@@ -48,13 +55,11 @@ def parse_subject(subject: str):
 major = minor = patch = False
 for c in commits:
     lines = c.splitlines()
-    subject = lines[0].strip() if lines else ""
-    body = "\n".join(lines[1:])
+    subject = lines[1].strip() if len(lines) > 1 else ""
+    body = "\n".join(lines[2:])
     if is_release_commit(subject):
         continue
     ctype, breaking = parse_subject(subject)
-    if ctype not in {"feat", "fix", "perf"}:
-        continue
     if breaking or "BREAKING CHANGE" in body:
         major = True
         continue
@@ -63,6 +68,17 @@ for c in commits:
         continue
     if ctype in {"fix", "perf"}:
         patch = True
+        continue
+    if ctype == "chore" and subject.startswith("chore(deps):"):
+        files = changed_files(c)
+        if any(
+            path in {"go.mod", "go.sum", "Dockerfile", "Dockerfile.goreleaser"}
+            or path.startswith("pkg/")
+            or path.startswith("charts/justmount/")
+            for path in files
+        ):
+            patch = True
+        continue
 
 if not (major or minor or patch):
     print("")
@@ -115,7 +131,7 @@ data["."] = "${next_version}"
 path.write_text(json.dumps(data, indent=2) + "\n")
 PY
 
-perl -0pi -e "s/^appVersion: .*$/appVersion: ${next_version}/m" charts/justmount/Chart.yaml
+perl -0pi -e "s/^appVersion: .*$/appVersion: ${next_version#v}/m" charts/justmount/Chart.yaml
 
 git add .release-please-manifest.json charts/justmount/Chart.yaml
 git commit -m "chore(release): ${tag}"

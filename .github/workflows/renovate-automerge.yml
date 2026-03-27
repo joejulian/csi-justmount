@@ -27,10 +27,7 @@ jobs:
           GH_TOKEN: ${{ secrets.RENOVATE_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          state="$(gh pr view --repo "${{ github.repository }}" "${PR_NUMBER}" --json mergeStateStatus --jq '.mergeStateStatus')"
-          if [[ "${state}" == "BEHIND" ]]; then
-            gh pr update-branch --repo "${{ github.repository }}" "${PR_NUMBER}" --rebase
-          fi
+          gh pr update-branch --repo "${{ github.repository }}" "${PR_NUMBER}" --rebase || true
 
           if gh pr merge --repo "${{ github.repository }}" --auto --rebase "${PR_NUMBER}"; then
             exit 0
@@ -46,16 +43,12 @@ jobs:
         run: |
           set +e
           failed=0
-          gh pr list --repo "${REPO}" --state open --json number,headRefName,isDraft,labels,mergeStateStatus \
+          gh pr list --repo "${REPO}" --state open --json number,headRefName,isDraft,labels \
             --jq '.[] | select((.headRefName | startswith("renovate/")) and (.isDraft | not) and ((.labels | map(.name) | index("automerge")) != null)) | @base64' \
             | while read -r pr_json; do
                 [[ -n "${pr_json}" ]] || continue
                 pr="$(printf '%s' "${pr_json}" | base64 -d | jq -r '.number')"
-                state="$(printf '%s' "${pr_json}" | base64 -d | jq -r '.mergeStateStatus')"
-
-                if [[ "${state}" == "BEHIND" ]]; then
-                  gh pr update-branch --repo "${REPO}" "${pr}" --rebase || failed=1
-                fi
+                gh pr update-branch --repo "${REPO}" "${pr}" --rebase || true
 
                 if gh pr merge --repo "${REPO}" --auto --rebase "${pr}"; then
                   continue

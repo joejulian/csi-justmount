@@ -1,6 +1,9 @@
 name: Renovate Automerge
 
 on:
+  push:
+    branches:
+      - main
   pull_request_target:
     types:
       - opened
@@ -24,6 +27,11 @@ jobs:
           GH_TOKEN: ${{ secrets.RENOVATE_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
+          state="$(gh pr view --repo "${{ github.repository }}" "${PR_NUMBER}" --json mergeStateStatus --jq '.mergeStateStatus')"
+          if [[ "${state}" == "BEHIND" ]]; then
+            gh pr update-branch --repo "${{ github.repository }}" "${PR_NUMBER}" --rebase
+          fi
+
           if gh pr merge --repo "${{ github.repository }}" --auto --rebase "${PR_NUMBER}"; then
             exit 0
           fi
@@ -31,17 +39,24 @@ jobs:
           gh pr update-branch --repo "${{ github.repository }}" "${PR_NUMBER}" --rebase
           gh pr merge --repo "${{ github.repository }}" --auto --rebase "${PR_NUMBER}"
       - name: Enable automerge for open Renovate PRs
-        if: ${{ github.event_name == 'workflow_dispatch' }}
+        if: ${{ github.event_name != 'pull_request_target' }}
         env:
           GH_TOKEN: ${{ secrets.RENOVATE_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
           set +e
           failed=0
-          gh pr list --repo "${REPO}" --state open --json number,headRefName,isDraft,labels \
-            --jq '.[] | select((.headRefName | startswith("renovate/")) and (.isDraft | not) and ((.labels | map(.name) | index("automerge")) != null)) | .number' \
-            | while read -r pr; do
-                [[ -n "${pr}" ]] || continue
+          gh pr list --repo "${REPO}" --state open --json number,headRefName,isDraft,labels,mergeStateStatus \
+            --jq '.[] | select((.headRefName | startswith("renovate/")) and (.isDraft | not) and ((.labels | map(.name) | index("automerge")) != null)) | @base64' \
+            | while read -r pr_json; do
+                [[ -n "${pr_json}" ]] || continue
+                pr="$(printf '%s' "${pr_json}" | base64 -d | jq -r '.number')"
+                state="$(printf '%s' "${pr_json}" | base64 -d | jq -r '.mergeStateStatus')"
+
+                if [[ "${state}" == "BEHIND" ]]; then
+                  gh pr update-branch --repo "${REPO}" "${pr}" --rebase || failed=1
+                fi
+
                 if gh pr merge --repo "${REPO}" --auto --rebase "${pr}"; then
                   continue
                 fi

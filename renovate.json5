@@ -19,8 +19,8 @@
       addLabels: ["automerge"],
     },
     {
-      matchDatasources: ["docker"],
       matchManagers: ["custom.regex"],
+      matchUpdateTypes: ["minor", "patch", "digest"],
       automerge: true,
       addLabels: ["automerge"],
     },

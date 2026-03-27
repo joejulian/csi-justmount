@@ -14,7 +14,7 @@
   rebaseWhen: "behind-base-branch",
   packageRules: [
     {
-      matchManagers: ["github-actions", "gomod", "dockerfile"],
+      matchManagers: ["github-actions", "gomod", "dockerfile", "helm-values"],
       automerge: true,
       addLabels: ["automerge"],
     },

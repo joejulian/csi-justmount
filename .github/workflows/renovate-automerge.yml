@@ -1,0 +1,38 @@
+name: Renovate Automerge
+
+on:
+  pull_request_target:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - labeled
+      - ready_for_review
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  enable:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enable automerge for current PR
+        if: ${{ github.event_name == 'pull_request_target' && startsWith(github.event.pull_request.head.ref, 'renovate/') && contains(join(github.event.pull_request.labels.*.name, ','), 'automerge') && !github.event.pull_request.draft }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: gh pr merge --repo "${{ github.repository }}" --auto --rebase "${PR_NUMBER}"
+      - name: Enable automerge for open Renovate PRs
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh pr list --repo "${REPO}" --state open --json number,headRefName,isDraft,labels \
+            --jq '.[] | select((.headRefName | startswith("renovate/")) and (.isDraft | not) and ((.labels | map(.name) | index("automerge")) != null)) | .number' \
+            | while read -r pr; do
+                [[ -n "${pr}" ]] || continue
+                gh pr merge --repo "${REPO}" --auto --rebase "${pr}"
+              done

@@ -458,6 +458,7 @@ github.com/matttproud/golang_protobuf_extensions v1.0.1 h1:4hp9jkHxhMHkqkrB3Ix0j
 github.com/matttproud/golang_protobuf_extensions v1.0.1/go.mod h1:D8He9yQNgCq6Z5Ld7szi9bcBfOoFv/3dc6xSMkL2PC0=
 github.com/maxbrunsfeld/counterfeiter/v6 v6.12.1 h1:D4O2wLxB384TS3ohBJMfolnxb4qGmoZ1PnWNtit8LYo=
 github.com/maxbrunsfeld/counterfeiter/v6 v6.12.1/go.mod h1:RuJdxo0oI6dClIaMzdl3hewq3a065RH65dofJP03h8I=
+github.com/maxbrunsfeld/counterfeiter/v6 v6.12.2/go.mod h1:Mr897yU9FmyKaQDPtRlVKibrjz40XXyOHUfyZBPSyZU=
 github.com/mfridman/tparse v0.18.0 h1:wh6dzOKaIwkUGyKgOntDW4liXSo37qg5AXbIhkMV3vE=
 github.com/mfridman/tparse v0.18.0/go.mod h1:gEvqZTuCgEhPbYk/2lS3Kcxg1GmTxxU7kTC8DvP0i/A=
 github.com/mgechev/revive v1.13.0 h1:yFbEVliCVKRXY8UgwEO7EOYNopvjb1BFbmYqm9hZjBM=

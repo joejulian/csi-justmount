@@ -1,24 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-current_version="$(python3 - <<'PY'
-import json
-from pathlib import Path
-
-path = Path(".release-please-manifest.json")
-if not path.exists():
-    print("0.0.0")
-    raise SystemExit
-data = json.loads(path.read_text())
-print(data.get(".", "0.0.0"))
-PY
-)"
-
 latest_tag="$(git tag --list "v*" --sort=-v:refname | head -n1)"
 
 if [[ -n "${latest_tag}" ]]; then
+  current_version="${latest_tag#v}"
   log_range="${latest_tag}..HEAD"
 else
+  current_version="0.0.0"
   log_range="HEAD"
 fi
 
@@ -121,23 +110,7 @@ if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
   exit 0
 fi
 
-python3 - <<PY
-import json
-from pathlib import Path
-
-path = Path(".release-please-manifest.json")
-data = json.loads(path.read_text())
-data["."] = "${next_version}"
-path.write_text(json.dumps(data, indent=2) + "\n")
-PY
-
-perl -0pi -e "s/^appVersion: .*$/appVersion: ${next_version#v}/m" charts/justmount/Chart.yaml
-
-git add .release-please-manifest.json charts/justmount/Chart.yaml
-git commit -m "chore(release): ${tag}"
 git tag "${tag}"
-
-git push origin HEAD:main
 git push origin "${tag}"
 
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then

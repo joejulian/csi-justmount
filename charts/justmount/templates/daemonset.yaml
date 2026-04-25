@@ -16,6 +16,9 @@ spec:
     spec:
       serviceAccountName: {{ include "justmount.serviceAccountName" . }}
       hostNetwork: {{ .Values.node.hostNetwork }}
+{{- with .Values.node.priorityClassName }}
+      priorityClassName: {{ . }}
+{{- end }}
       containers:
         - name: node-driver-registrar
           image: {{ .Values.registrar.image }}

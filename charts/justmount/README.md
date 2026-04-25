@@ -31,6 +31,7 @@ Key values (see `values.yaml` for the full list):
 - `node.endpoint`
 - `node.kubeletDir`
 - `node.updateStrategy` (defaults to `OnDelete` to avoid rolling FUSE mounts)
+- `node.priorityClassName` (defaults to `system-node-critical`)
 - `csidriver.name`
 
 ## FUSE Note

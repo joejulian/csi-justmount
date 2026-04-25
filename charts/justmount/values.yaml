@@ -11,6 +11,7 @@ node:
   kubeletDir: /var/lib/kubelet
   fuseDevice: /dev/fuse
   updateStrategy: OnDelete
+  priorityClassName: system-node-critical
 
 registrar:
   # renovate: image=registry.k8s.io/sig-storage/csi-node-driver-registrar

@@ -52,14 +52,14 @@ func (n *Node) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolume
 		return nil, status.Errorf(codes.Internal, "failed to create target path: %v", err)
 	}
 
-	repaired, err := n.waitForMountReady(ctx, req.GetStagingTargetPath())
+	repaired, err := n.waitForMountReady(ctx, req)
 	if err != nil {
 		if repaired {
 			return nil, err
 		}
 		for i := 0; i < 3; i++ {
 			time.Sleep(100 * time.Millisecond)
-			repaired, err = n.waitForMountReady(ctx, req.GetStagingTargetPath())
+			repaired, err = n.waitForMountReady(ctx, req)
 			if err == nil {
 				break
 			}
@@ -72,7 +72,7 @@ func (n *Node) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolume
 		}
 	}
 
-	if published, err := n.preparePublishTarget(ctx, req.GetTargetPath()); err != nil {
+	if published, err := n.preparePublishTarget(ctx, req); err != nil {
 		return nil, err
 	} else if published {
 		Logger(ctx).Info("NodePublishVolume complete: target path already mounted and usable")
@@ -95,7 +95,8 @@ func (n *Node) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolume
 	return &csi.NodePublishVolumeResponse{}, nil
 }
 
-func (n *Node) waitForMountReady(ctx context.Context, path string) (bool, error) {
+func (n *Node) waitForMountReady(ctx context.Context, req *csi.NodePublishVolumeRequest) (bool, error) {
+	path := req.GetStagingTargetPath()
 	isMounted, err := n.mounter.IsMountPoint(path)
 	if err != nil {
 		Logger(ctx).Error("failed to verify if path is a mount point",
@@ -126,18 +127,23 @@ func (n *Node) waitForMountReady(ctx context.Context, path string) (bool, error)
 			zap.String("staging_target_path", path),
 			zap.Error(err),
 		)
+		n.reportRepairStarted(ctx, req, "JustmountStagingMountDisconnected",
+			"Disconnected justmount staging mount detected; unmounting dependent bind mounts and staging target")
 		if err := n.unmountDependentMounts(ctx, path); err != nil {
 			return false, status.Errorf(codes.Internal, "failed to unmount dependent bind mounts: %v", err)
 		}
 		if err := n.unmountAllAtPath(ctx, path); err != nil {
 			return false, status.Errorf(codes.Internal, "failed to unmount disconnected staging target path: %v", err)
 		}
+		n.reportRepairCompleted(ctx, req, "JustmountStagingMountUnstaged",
+			"Disconnected justmount staging mount and dependent bind mounts were unmounted successfully")
 		return true, status.Error(codes.FailedPrecondition, "staging mount was disconnected and has been unstaged; retry after staging")
 	}
 	return false, nil
 }
 
-func (n *Node) preparePublishTarget(ctx context.Context, targetPath string) (bool, error) {
+func (n *Node) preparePublishTarget(ctx context.Context, req *csi.NodePublishVolumeRequest) (bool, error) {
+	targetPath := req.GetTargetPath()
 	isMounted, err := n.mounter.IsMountPoint(targetPath)
 	if err != nil {
 		Logger(ctx).Error("NodePublishVolume failed to check target mountpoint",
@@ -166,10 +172,48 @@ func (n *Node) preparePublishTarget(ctx context.Context, targetPath string) (boo
 	Logger(ctx).Warn("NodePublishVolume replacing disconnected target bind mount",
 		zap.String("target_path", targetPath),
 	)
+	n.reportRepairStarted(ctx, req, "JustmountBindMountDisconnected",
+		"Disconnected justmount bind mount detected; replacing target bind mount")
 	if err := n.unmountAllAtPath(ctx, targetPath); err != nil {
 		return false, status.Errorf(codes.Internal, "failed to unmount disconnected target path: %v", err)
 	}
+	n.reportRepairCompleted(ctx, req, "JustmountBindMountReplaced",
+		"Disconnected justmount bind mount was unmounted successfully and will be replaced")
 	return false, nil
+}
+
+func (n *Node) reportRepairStarted(
+	ctx context.Context,
+	req *csi.NodePublishVolumeRequest,
+	reason string,
+	message string,
+) {
+	if n.pvcReporter == nil {
+		return
+	}
+	if err := n.pvcReporter.RepairStarted(ctx, req, reason, message); err != nil {
+		Logger(ctx).Warn("failed to report justmount repair start",
+			zap.String("reason", reason),
+			zap.Error(err),
+		)
+	}
+}
+
+func (n *Node) reportRepairCompleted(
+	ctx context.Context,
+	req *csi.NodePublishVolumeRequest,
+	reason string,
+	message string,
+) {
+	if n.pvcReporter == nil {
+		return
+	}
+	if err := n.pvcReporter.RepairCompleted(ctx, req, reason, message); err != nil {
+		Logger(ctx).Warn("failed to report justmount repair completion",
+			zap.String("reason", reason),
+			zap.Error(err),
+		)
+	}
 }
 
 func findMountInfoLine(path string) (string, bool) {

@@ -11,12 +11,15 @@ import (
 	"google.golang.org/grpc/reflection"
 )
 
+const driverName = "justmount.csi.driver"
+
 type Node struct {
 	// Fields for any required configuration can be added here
-	nodeID   string
-	endpoint string
-	server   *grpc.Server
-	mounter  Mounter
+	nodeID      string
+	endpoint    string
+	server      *grpc.Server
+	mounter     Mounter
+	pvcReporter PVCReporter
 
 	csi.UnimplementedNodeServer
 	csi.UnimplementedIdentityServer
@@ -24,10 +27,15 @@ type Node struct {
 
 // NewNode creates a new Node service
 func NewNode(nodeID, endpoint string) *Node {
+	reporter, err := NewKubernetesPVCReporter(nodeID, driverName)
+	if err != nil {
+		BaseLogger().Warn("PVC condition reporting disabled", zap.Error(err))
+	}
 	return &Node{
-		nodeID:   nodeID,
-		endpoint: endpoint,
-		mounter:  SyscallMounter{},
+		nodeID:      nodeID,
+		endpoint:    endpoint,
+		mounter:     SyscallMounter{},
+		pvcReporter: reporter,
 	}
 }
 
@@ -119,8 +127,8 @@ func (n *Node) Probe(ctx context.Context, req *csi.ProbeRequest) (*csi.ProbeResp
 func (n *Node) GetPluginInfo(ctx context.Context, req *csi.GetPluginInfoRequest) (*csi.GetPluginInfoResponse, error) {
 	Logger(ctx).Info("GetPluginInfo start")
 	resp := &csi.GetPluginInfoResponse{
-		Name:          "justmount.csi.driver", // Unique name for your CSI driver
-		VendorVersion: "0.0.1",                // Driver version
+		Name:          driverName,
+		VendorVersion: "0.0.1", // Driver version
 	}
 	Logger(ctx).Info("GetPluginInfo complete", zap.String("name", resp.Name), zap.String("version", resp.VendorVersion))
 	return resp, nil

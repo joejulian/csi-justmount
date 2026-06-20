@@ -18,6 +18,21 @@ type recordingMounter struct {
 	unmounts []string
 }
 
+type recordingPVCReporter struct {
+	started   []string
+	completed []string
+}
+
+func (r *recordingPVCReporter) RepairStarted(ctx context.Context, req *csi.NodePublishVolumeRequest, reason, message string) error {
+	r.started = append(r.started, reason)
+	return nil
+}
+
+func (r *recordingPVCReporter) RepairCompleted(ctx context.Context, req *csi.NodePublishVolumeRequest, reason, message string) error {
+	r.completed = append(r.completed, reason)
+	return nil
+}
+
 func (m *recordingMounter) Mount(source, target, fstype string, flags uintptr, data string) error {
 	m.mounted[target] = true
 	m.mounts = append(m.mounts, target)
@@ -117,6 +132,8 @@ func TestNodePublishVolumeReplacesDisconnectedTargetBindWithoutRemovingDirectory
 		},
 	}
 	n := NewNodeWithMounter("node-id", "/tmp/test-csi.sock", mounter)
+	reporter := &recordingPVCReporter{}
+	n.pvcReporter = reporter
 
 	origProbeMountPath := probeMountPath
 	probeMountPath = func(path string) error {
@@ -150,6 +167,12 @@ func TestNodePublishVolumeReplacesDisconnectedTargetBindWithoutRemovingDirectory
 	if _, err := os.Stat(child); err != nil {
 		t.Fatalf("NodePublishVolume() removed target child, stat error = %v", err)
 	}
+	if len(reporter.started) != 1 || reporter.started[0] != "JustmountBindMountDisconnected" {
+		t.Fatalf("NodePublishVolume() repair start reports = %v, want [JustmountBindMountDisconnected]", reporter.started)
+	}
+	if len(reporter.completed) != 1 || reporter.completed[0] != "JustmountBindMountReplaced" {
+		t.Fatalf("NodePublishVolume() repair completion reports = %v, want [JustmountBindMountReplaced]", reporter.completed)
+	}
 }
 
 func TestNodePublishVolumeUnstagesDisconnectedStagingAndDependentBinds(t *testing.T) {
@@ -166,6 +189,8 @@ func TestNodePublishVolumeUnstagesDisconnectedStagingAndDependentBinds(t *testin
 		},
 	}
 	n := NewNodeWithMounter("node-id", "/tmp/test-csi.sock", mounter)
+	reporter := &recordingPVCReporter{}
+	n.pvcReporter = reporter
 
 	origProbeMountPath := probeMountPath
 	probeMountPath = func(path string) error {
@@ -212,6 +237,12 @@ func TestNodePublishVolumeUnstagesDisconnectedStagingAndDependentBinds(t *testin
 	}
 	if len(mounter.mounts) != 0 {
 		t.Fatalf("NodePublishVolume() mounts = %v, want none", mounter.mounts)
+	}
+	if len(reporter.started) != 1 || reporter.started[0] != "JustmountStagingMountDisconnected" {
+		t.Fatalf("NodePublishVolume() repair start reports = %v, want [JustmountStagingMountDisconnected]", reporter.started)
+	}
+	if len(reporter.completed) != 1 || reporter.completed[0] != "JustmountStagingMountUnstaged" {
+		t.Fatalf("NodePublishVolume() repair completion reports = %v, want [JustmountStagingMountUnstaged]", reporter.completed)
 	}
 }
 

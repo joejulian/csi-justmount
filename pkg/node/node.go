@@ -86,6 +86,13 @@ func (n *Node) NodeGetCapabilities(ctx context.Context, req *csi.NodeGetCapabili
 					},
 				},
 			},
+			{
+				Type: &csi.NodeServiceCapability_Rpc{
+					Rpc: &csi.NodeServiceCapability_RPC{
+						Type: csi.NodeServiceCapability_RPC_VOLUME_CONDITION,
+					},
+				},
+			},
 		},
 	}
 	Logger(ctx).Info("node capabilities", zap.Any("capabilities", resp.Capabilities))

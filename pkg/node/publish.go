@@ -52,13 +52,19 @@ func (n *Node) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolume
 		return nil, status.Errorf(codes.Internal, "failed to create target path: %v", err)
 	}
 
-	err := n.waitForMountReady(ctx, req.GetStagingTargetPath())
+	repaired, err := n.waitForMountReady(ctx, req.GetStagingTargetPath())
 	if err != nil {
+		if repaired {
+			return nil, err
+		}
 		for i := 0; i < 3; i++ {
 			time.Sleep(100 * time.Millisecond)
-			err = n.waitForMountReady(ctx, req.GetStagingTargetPath())
+			repaired, err = n.waitForMountReady(ctx, req.GetStagingTargetPath())
 			if err == nil {
 				break
+			}
+			if repaired {
+				return nil, err
 			}
 		}
 		if err != nil {
@@ -89,14 +95,14 @@ func (n *Node) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolume
 	return &csi.NodePublishVolumeResponse{}, nil
 }
 
-func (n *Node) waitForMountReady(ctx context.Context, path string) error {
+func (n *Node) waitForMountReady(ctx context.Context, path string) (bool, error) {
 	isMounted, err := n.mounter.IsMountPoint(path)
 	if err != nil {
 		Logger(ctx).Error("failed to verify if path is a mount point",
 			zap.String("path", path),
 			zap.Error(err),
 		)
-		return status.Errorf(codes.Internal, "failed to verify path mountpoint: %v", err)
+		return false, status.Errorf(codes.Internal, "failed to verify path mountpoint: %v", err)
 	}
 	if !isMounted {
 		Logger(ctx).Warn("path is not a mount point", zap.String("path", path))
@@ -105,16 +111,30 @@ func (n *Node) waitForMountReady(ctx context.Context, path string) error {
 		} else {
 			Logger(ctx).Info("mountinfo does not contain path")
 		}
-		return status.Error(codes.FailedPrecondition, "path is not a mount point")
+		return false, status.Error(codes.FailedPrecondition, "path is not a mount point")
 	}
 	if err := probeMountPath(path); err != nil {
 		Logger(ctx).Warn("mount point is not usable",
 			zap.String("path", path),
 			zap.Error(err),
 		)
-		return status.Errorf(codes.FailedPrecondition, "mount point is not usable: %v", err)
+		if !isDisconnectedMountError(err) {
+			return false, status.Errorf(codes.FailedPrecondition, "mount point is not usable: %v", err)
+		}
+
+		Logger(ctx).Warn("NodePublishVolume unstaging disconnected staging mount",
+			zap.String("staging_target_path", path),
+			zap.Error(err),
+		)
+		if err := n.unmountDependentMounts(ctx, path); err != nil {
+			return false, status.Errorf(codes.Internal, "failed to unmount dependent bind mounts: %v", err)
+		}
+		if err := n.unmountAllAtPath(ctx, path); err != nil {
+			return false, status.Errorf(codes.Internal, "failed to unmount disconnected staging target path: %v", err)
+		}
+		return true, status.Error(codes.FailedPrecondition, "staging mount was disconnected and has been unstaged; retry after staging")
 	}
-	return nil
+	return false, nil
 }
 
 func (n *Node) preparePublishTarget(ctx context.Context, targetPath string) (bool, error) {

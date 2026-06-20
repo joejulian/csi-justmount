@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	csi "github.com/container-storage-interface/spec/lib/go/csi"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type recordingMounter struct {
@@ -147,5 +149,121 @@ func TestNodePublishVolumeReplacesDisconnectedTargetBindWithoutRemovingDirectory
 	}
 	if _, err := os.Stat(child); err != nil {
 		t.Fatalf("NodePublishVolume() removed target child, stat error = %v", err)
+	}
+}
+
+func TestNodePublishVolumeUnstagesDisconnectedStagingAndDependentBinds(t *testing.T) {
+	stagingPath := t.TempDir()
+	podTarget := filepath.Join(t.TempDir(), "pod-target")
+	nestedTarget := filepath.Join(podTarget, "nested")
+	publishTarget := t.TempDir()
+
+	mounter := &recordingMounter{
+		mounted: map[string]bool{
+			stagingPath:  true,
+			podTarget:    true,
+			nestedTarget: true,
+		},
+	}
+	n := NewNodeWithMounter("node-id", "/tmp/test-csi.sock", mounter)
+
+	origProbeMountPath := probeMountPath
+	probeMountPath = func(path string) error {
+		if path == stagingPath {
+			return syscall.ENOTCONN
+		}
+		return nil
+	}
+	t.Cleanup(func() { probeMountPath = origProbeMountPath })
+
+	origReadMountInfo := readMountInfo
+	readMountInfo = func() ([]byte, error) {
+		return []byte(
+			"1 0 0:42 / " + stagingPath + " rw - fuse.glusterfs gluster:media rw\n" +
+				"2 0 0:42 / " + podTarget + " rw - fuse.glusterfs gluster:media rw\n" +
+				"3 0 0:42 / " + nestedTarget + " rw - fuse.glusterfs gluster:media rw\n",
+		), nil
+	}
+	t.Cleanup(func() { readMountInfo = origReadMountInfo })
+
+	req := &csi.NodePublishVolumeRequest{
+		VolumeId:          "test-volume",
+		StagingTargetPath: stagingPath,
+		TargetPath:        publishTarget,
+		VolumeCapability: &csi.VolumeCapability{
+			AccessType: &csi.VolumeCapability_Mount{
+				Mount: &csi.VolumeCapability_MountVolume{FsType: "glusterfs"},
+			},
+		},
+	}
+
+	if _, err := n.NodePublishVolume(context.Background(), req); status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("NodePublishVolume() error code = %v, want %v; error = %v", status.Code(err), codes.FailedPrecondition, err)
+	}
+
+	wantUnmounts := []string{nestedTarget, podTarget, stagingPath}
+	if len(mounter.unmounts) != len(wantUnmounts) {
+		t.Fatalf("NodePublishVolume() unmounts = %v, want %v", mounter.unmounts, wantUnmounts)
+	}
+	for i := range wantUnmounts {
+		if mounter.unmounts[i] != wantUnmounts[i] {
+			t.Errorf("NodePublishVolume() unmounts[%d] = %q, want %q", i, mounter.unmounts[i], wantUnmounts[i])
+		}
+	}
+	if len(mounter.mounts) != 0 {
+		t.Fatalf("NodePublishVolume() mounts = %v, want none", mounter.mounts)
+	}
+}
+
+func TestNodeGetVolumeStatsReportsDisconnectedVolumeCondition(t *testing.T) {
+	volumePath := t.TempDir()
+	n := NewNodeWithMounter("node-id", "/tmp/test-csi.sock", &recordingMounter{mounted: map[string]bool{}})
+
+	origProbeMountPath := probeMountPath
+	probeMountPath = func(path string) error {
+		if path == volumePath {
+			return syscall.ENOTCONN
+		}
+		return nil
+	}
+	t.Cleanup(func() { probeMountPath = origProbeMountPath })
+
+	resp, err := n.NodeGetVolumeStats(context.Background(), &csi.NodeGetVolumeStatsRequest{
+		VolumeId:   "test-volume",
+		VolumePath: volumePath,
+	})
+	if err != nil {
+		t.Fatalf("NodeGetVolumeStats() error = %v, want nil", err)
+	}
+	if resp.GetVolumeCondition() == nil {
+		t.Fatalf("NodeGetVolumeStats() volume condition = nil, want abnormal condition")
+	}
+	if !resp.GetVolumeCondition().GetAbnormal() {
+		t.Fatalf("NodeGetVolumeStats() abnormal = false, want true")
+	}
+	if resp.GetVolumeCondition().GetMessage() == "" {
+		t.Fatalf("NodeGetVolumeStats() message = empty, want diagnostic message")
+	}
+}
+
+func TestNodeGetVolumeStatsReportsHealthyVolumeCondition(t *testing.T) {
+	volumePath := t.TempDir()
+	n := NewNodeWithMounter("node-id", "/tmp/test-csi.sock", &recordingMounter{mounted: map[string]bool{}})
+
+	resp, err := n.NodeGetVolumeStats(context.Background(), &csi.NodeGetVolumeStatsRequest{
+		VolumeId:   "test-volume",
+		VolumePath: volumePath,
+	})
+	if err != nil {
+		t.Fatalf("NodeGetVolumeStats() error = %v, want nil", err)
+	}
+	if resp.GetVolumeCondition() == nil {
+		t.Fatalf("NodeGetVolumeStats() volume condition = nil, want healthy condition")
+	}
+	if resp.GetVolumeCondition().GetAbnormal() {
+		t.Fatalf("NodeGetVolumeStats() abnormal = true, want false")
+	}
+	if len(resp.GetUsage()) == 0 {
+		t.Fatalf("NodeGetVolumeStats() usage entries = 0, want at least one")
 	}
 }

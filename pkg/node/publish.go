@@ -2,6 +2,8 @@ package node
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -50,36 +52,25 @@ func (n *Node) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolume
 		return nil, status.Errorf(codes.Internal, "failed to create target path: %v", err)
 	}
 
-	// Ensure the staging path is a mount point
-	isMounted, err := n.mounter.IsMountPoint(req.GetStagingTargetPath())
+	err := n.waitForMountReady(ctx, req.GetStagingTargetPath())
 	if err != nil {
-		Logger(ctx).Error("failed to verify if staging path is a mount point", zap.Error(err))
-		return nil, status.Errorf(codes.Internal, "failed to verify if staging path is a mount point: %v", err)
-	}
-	if !isMounted {
 		for i := 0; i < 3; i++ {
 			time.Sleep(100 * time.Millisecond)
-			isMounted, err = n.mounter.IsMountPoint(req.GetStagingTargetPath())
-			if err != nil {
-				Logger(ctx).Error("failed to verify if staging path is a mount point",
-					zap.Int("retry", i+1),
-					zap.Error(err),
-				)
-				return nil, status.Errorf(codes.Internal, "failed to verify if staging path is a mount point: %v", err)
-			}
-			if isMounted {
+			err = n.waitForMountReady(ctx, req.GetStagingTargetPath())
+			if err == nil {
 				break
 			}
 		}
-	}
-	if !isMounted {
-		Logger(ctx).Warn("staging path is not a mount point", zap.String("staging_target_path", req.GetStagingTargetPath()))
-		if line, ok := findMountInfoLine(req.GetStagingTargetPath()); ok {
-			Logger(ctx).Info("mountinfo for staging path", zap.String("mountinfo", line))
-		} else {
-			Logger(ctx).Info("mountinfo does not contain staging path")
+		if err != nil {
+			return nil, err
 		}
-		return nil, status.Error(codes.FailedPrecondition, "staging_target_path is not a mount point")
+	}
+
+	if published, err := n.preparePublishTarget(ctx, req.GetTargetPath()); err != nil {
+		return nil, err
+	} else if published {
+		Logger(ctx).Info("NodePublishVolume complete: target path already mounted and usable")
+		return &csi.NodePublishVolumeResponse{}, nil
 	}
 
 	// Perform a bind mount from the staging path to the target path
@@ -96,6 +87,69 @@ func (n *Node) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolume
 	// Return success response
 	Logger(ctx).Info("NodePublishVolume complete")
 	return &csi.NodePublishVolumeResponse{}, nil
+}
+
+func (n *Node) waitForMountReady(ctx context.Context, path string) error {
+	isMounted, err := n.mounter.IsMountPoint(path)
+	if err != nil {
+		Logger(ctx).Error("failed to verify if path is a mount point",
+			zap.String("path", path),
+			zap.Error(err),
+		)
+		return status.Errorf(codes.Internal, "failed to verify path mountpoint: %v", err)
+	}
+	if !isMounted {
+		Logger(ctx).Warn("path is not a mount point", zap.String("path", path))
+		if line, ok := findMountInfoLine(path); ok {
+			Logger(ctx).Info("mountinfo for path", zap.String("mountinfo", line))
+		} else {
+			Logger(ctx).Info("mountinfo does not contain path")
+		}
+		return status.Error(codes.FailedPrecondition, "path is not a mount point")
+	}
+	if err := probeMountPath(path); err != nil {
+		Logger(ctx).Warn("mount point is not usable",
+			zap.String("path", path),
+			zap.Error(err),
+		)
+		return status.Errorf(codes.FailedPrecondition, "mount point is not usable: %v", err)
+	}
+	return nil
+}
+
+func (n *Node) preparePublishTarget(ctx context.Context, targetPath string) (bool, error) {
+	isMounted, err := n.mounter.IsMountPoint(targetPath)
+	if err != nil {
+		Logger(ctx).Error("NodePublishVolume failed to check target mountpoint",
+			zap.String("target_path", targetPath),
+			zap.Error(err),
+		)
+		return false, status.Errorf(codes.Internal, "failed to verify target path mountpoint: %v", err)
+	}
+	if !isMounted {
+		return false, nil
+	}
+
+	if err := probeMountPath(targetPath); err == nil {
+		Logger(ctx).Info("NodePublishVolume target path already mounted and usable",
+			zap.String("target_path", targetPath),
+		)
+		return true, nil
+	} else if !isDisconnectedMountError(err) {
+		Logger(ctx).Error("NodePublishVolume target path is mounted but not usable",
+			zap.String("target_path", targetPath),
+			zap.Error(err),
+		)
+		return false, status.Errorf(codes.Internal, "target_path is mounted but not usable: %v", err)
+	}
+
+	Logger(ctx).Warn("NodePublishVolume replacing disconnected target bind mount",
+		zap.String("target_path", targetPath),
+	)
+	if err := n.unmountAllAtPath(ctx, targetPath); err != nil {
+		return false, status.Errorf(codes.Internal, "failed to unmount disconnected target path: %v", err)
+	}
+	return false, nil
 }
 
 func findMountInfoLine(path string) (string, bool) {
@@ -130,7 +184,6 @@ func unescapeMountPath(path string) string {
 	)
 	return replacer.Replace(path)
 }
-
 
 func (n *Node) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublishVolumeRequest) (*csi.NodeUnpublishVolumeResponse, error) {
 	Logger(ctx).Info("NodeUnpublishVolume start",
@@ -172,13 +225,7 @@ func (n *Node) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublishVo
 			break
 		}
 
-		err = n.mounter.Unmount(targetPath, 0)
-		if err != nil {
-			Logger(ctx).Error("NodeUnpublishVolume failed to unmount target path",
-				zap.String("target_path", targetPath),
-				zap.Int("attempt", i+1),
-				zap.Error(err),
-			)
+		if err := n.unmountOnce(ctx, targetPath, i+1); err != nil {
 			return nil, status.Errorf(codes.Internal, "failed to unmount target path: %v", err)
 		}
 	}
@@ -205,4 +252,41 @@ func (n *Node) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublishVo
 
 	Logger(ctx).Info("NodeUnpublishVolume complete")
 	return &csi.NodeUnpublishVolumeResponse{}, nil
+}
+
+func (n *Node) unmountAllAtPath(ctx context.Context, path string) error {
+	for i := 0; i < 10; i++ {
+		isMounted, err := n.mounter.IsMountPoint(path)
+		if err != nil {
+			return fmt.Errorf("verify mountpoint %q: %w", path, err)
+		}
+		if !isMounted {
+			return nil
+		}
+		if err := n.unmountOnce(ctx, path, i+1); err != nil {
+			return err
+		}
+	}
+
+	isMounted, err := n.mounter.IsMountPoint(path)
+	if err != nil {
+		return fmt.Errorf("verify mountpoint %q after unmount attempts: %w", path, err)
+	}
+	if isMounted {
+		return fmt.Errorf("%q remains mounted after unmount attempts", path)
+	}
+	return nil
+}
+
+func (n *Node) unmountOnce(ctx context.Context, path string, attempt int) error {
+	err := n.mounter.Unmount(path, 0)
+	if err == nil || errors.Is(err, syscall.EINVAL) {
+		return nil
+	}
+	Logger(ctx).Error("failed to unmount path",
+		zap.String("path", path),
+		zap.Int("attempt", attempt),
+		zap.Error(err),
+	)
+	return err
 }

@@ -83,11 +83,38 @@ func (n *Node) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequ
 		return nil, status.Errorf(codes.Internal, "failed to create staging path: %v", err)
 	}
 
-	// If already mounted, return success (idempotent)
+	// If already mounted and usable, return success (idempotent). A disconnected
+	// FUSE mount must be replaced because existing bind mounts keep referencing
+	// the failed mount generation.
 	isMounted, err := n.mounter.IsMountPoint(volumePath)
 	if err == nil && isMounted {
-		Logger(ctx).Info("NodeStageVolume already mounted")
-		return &csi.NodeStageVolumeResponse{}, nil
+		if err := probeMountPath(volumePath); err == nil {
+			Logger(ctx).Info("NodeStageVolume already mounted")
+			return &csi.NodeStageVolumeResponse{}, nil
+		} else if !isDisconnectedMountError(err) {
+			Logger(ctx).Error("NodeStageVolume mounted staging path is not usable",
+				zap.String("staging_target_path", volumePath),
+				zap.Error(err),
+			)
+			return nil, status.Errorf(codes.Internal, "staging target path is mounted but not usable: %v", err)
+		}
+
+		Logger(ctx).Warn("NodeStageVolume replacing disconnected staging mount",
+			zap.String("staging_target_path", volumePath),
+			zap.Error(err),
+		)
+		if err := n.unmountDependentMounts(ctx, volumePath); err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to unmount dependent bind mounts: %v", err)
+		}
+		if err := n.unmountAllAtPath(ctx, volumePath); err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to unmount disconnected staging target path: %v", err)
+		}
+	} else if err != nil {
+		Logger(ctx).Error("NodeStageVolume failed to verify staging mountpoint",
+			zap.String("staging_target_path", volumePath),
+			zap.Error(err),
+		)
+		return nil, status.Errorf(codes.Internal, "failed to verify staging target path mountpoint: %v", err)
 	}
 
 	// Parse mount options

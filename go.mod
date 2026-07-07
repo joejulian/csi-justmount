@@ -5,7 +5,7 @@ go 1.26.0
 require (
 	github.com/container-storage-interface/spec v1.12.0
 	github.com/google/uuid v1.6.0
-	github.com/kubernetes-csi/csi-test/v5 v5.4.0
+	github.com/kubernetes-csi/csi-test/v5 v5.5.0
 	github.com/onsi/ginkgo/v2 v2.32.0
 	github.com/onsi/gomega v1.42.1
 	github.com/spf13/pflag v1.0.10
@@ -222,6 +222,7 @@ require (
 	go.augendre.info/arangolint v0.4.0 // indirect
 	go.augendre.info/fatcontext v0.9.0 // indirect
 	go.uber.org/automaxprocs v1.6.0 // indirect
+	go.uber.org/mock v0.5.2 // indirect
 	go.uber.org/multierr v1.10.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.3 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect

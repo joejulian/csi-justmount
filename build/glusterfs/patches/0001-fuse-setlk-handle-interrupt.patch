@@ -1,0 +1,304 @@
+From 0c197471ead2461d3df350a092e3fbec38cb4226 Mon Sep 17 00:00:00 2001
+From: Csaba Henk <csaba@redhat.com>
+Date: Mon, 16 Jan 2023 07:34:18 +0100
+Subject: [PATCH] Introduce '--fuse-setlk-handle-interrupt' option (#3768)
+
+TL;DR this is a workaround to certain issues with
+locking.
+
+In detail:
+
+A number of semantic issues came up in relation to
+locking, due to which the jolly optimistic approach
+to lock interruption -- "well, we just make use of
+whatever cancellation primitives the locking API has
+to offer" -- is not always a viable choice.
+
+Solidifying the lock subsystem is an ongoing effort;
+however, until this reaches completion, we need a
+workaround, which, in this case, boils down to
+allowing users (mounters) to disable interruptability
+of locks via a gliusterfs command line / mount option.
+
+The issues that most obviously interfere with lock
+interruption are: #3177, #3179. (Note that by now
+the former one is resolved and closed; I'm mentioning
+it now as the referred misbehavior might still be present
+on older Glusterfs versions where this commit might get
+backported.)
+
+As there is no easy way to fix some of the referred
+issues, the default valie of the option shall be 'off'.
+
+Update: #3179
+Change-Id: I28568d6182b2e716b36995ee28b26726af633942
+Signed-off-by: Csaba Henk <csaba@redhat.com>
+
+Signed-off-by: Csaba Henk <csaba@redhat.com>
+---
+ glusterfsd/src/glusterfsd.c                 | 32 +++++++++
+ glusterfsd/src/glusterfsd.h                 |  1 +
+ libglusterfs/src/glusterfs/glusterfs.h      |  1 +
+ tests/features/flock_interrupt.t            |  2 +-
+ xlators/mount/fuse/src/fuse-bridge.c        | 76 +++++++++++++--------
+ xlators/mount/fuse/src/fuse-bridge.h        |  1 +
+ xlators/mount/fuse/utils/mount.glusterfs.in |  7 ++
+ 7 files changed, 90 insertions(+), 30 deletions(-)
+
+diff --git a/glusterfsd/src/glusterfsd.c b/glusterfsd/src/glusterfsd.c
+index cd9c978f8a..4611676d1b 100644
+--- a/glusterfsd/src/glusterfsd.c
++++ b/glusterfsd/src/glusterfsd.c
+@@ -269,6 +269,8 @@ static struct argp_option gf_options[] = {
+     {"fuse-flush-handle-interrupt", ARGP_FUSE_FLUSH_HANDLE_INTERRUPT_KEY,
+      "BOOL", OPTION_ARG_OPTIONAL | OPTION_HIDDEN,
+      "handle interrupt in fuse FLUSH handler"},
++    {"fuse-setlk-handle-interrupt", ARGP_FUSE_SETLK_HANDLE_INTERRUPT_KEY,
++     "BOOL", OPTION_ARG_OPTIONAL, "handle interrupt in fuse SETLK handler"},
+     {"auto-invalidation", ARGP_FUSE_AUTO_INVAL_KEY, "BOOL", OPTION_ARG_OPTIONAL,
+      "controls whether fuse-kernel can auto-invalidate "
+      "attribute, dentry and page-cache. "
+@@ -538,6 +540,20 @@ set_fuse_mount_options(glusterfs_ctx_t *ctx, dict_t *options)
+                          cmd_args->fuse_flush_handle_interrupt);
+             break;
+     }
++    switch (cmd_args->fuse_setlk_handle_interrupt) {
++        case GF_OPTION_ENABLE:
++            DICT_SET_VAL(dict_set_static_ptr, options, "setlk-handle-interrupt",
++                         "on", glusterfsd_msg_3);
++            break;
++        case GF_OPTION_DISABLE:
++            DICT_SET_VAL(dict_set_static_ptr, options, "setlk-handle-interrupt",
++                         "off", glusterfsd_msg_3);
++            break;
++        default:
++            gf_msg_debug("glusterfsd", 0, "fuse-setlk-handle-interrupt mode %d",
++                         cmd_args->fuse_setlk_handle_interrupt);
++            break;
++    }
+     if (cmd_args->global_threading) {
+         DICT_SET_VAL(dict_set_static_ptr, options, "global-threading", "on",
+                      glusterfsd_msg_3);
+@@ -1352,6 +1368,21 @@ parse_opts(int key, char *arg, struct argp_state *state)
+                          arg);
+             break;
+ 
++        case ARGP_FUSE_SETLK_HANDLE_INTERRUPT_KEY:
++            if (!arg)
++                arg = "yes";
++
++            if (gf_string2boolean(arg, &b) == 0) {
++                cmd_args->fuse_setlk_handle_interrupt = b;
++
++                break;
++            }
++
++            argp_failure(state, -1, 0,
++                         "unknown fuse setlk handle interrupt setting \"%s\"",
++                         arg);
++            break;
++
+         case ARGP_FUSE_AUTO_INVAL_KEY:
+             if (!arg)
+                 arg = "yes";
+@@ -1707,6 +1738,7 @@ glusterfs_ctx_defaults_init(glusterfs_ctx_t *ctx)
+     cmd_args->fopen_keep_cache = GF_OPTION_DEFERRED;
+     cmd_args->kernel_writeback_cache = GF_OPTION_DEFERRED;
+     cmd_args->fuse_flush_handle_interrupt = GF_OPTION_DEFERRED;
++    cmd_args->fuse_setlk_handle_interrupt = GF_OPTION_DEFERRED;
+ 
+     if (ctx->mem_acct_enable)
+         cmd_args->mem_acct = 1;
+diff --git a/glusterfsd/src/glusterfsd.h b/glusterfsd/src/glusterfsd.h
+index f69f4e8a07..6f3a9db236 100644
+--- a/glusterfsd/src/glusterfsd.h
++++ b/glusterfsd/src/glusterfsd.h
+@@ -118,6 +118,7 @@ enum argp_option_keys {
+     ARGP_FUSE_INVALIDATE_LIMIT_KEY = 195,
+     ARGP_FUSE_DISPLAY_NAME_KEY = 196,
+     ARGP_IO_ENGINE_KEY = 197,
++    ARGP_FUSE_SETLK_HANDLE_INTERRUPT_KEY = 198,
+ };
+ 
+ struct _gfd_vol_top_priv {
+diff --git a/libglusterfs/src/glusterfs/glusterfs.h b/libglusterfs/src/glusterfs/glusterfs.h
+index 57ae332086..52d84bc638 100644
+--- a/libglusterfs/src/glusterfs/glusterfs.h
++++ b/libglusterfs/src/glusterfs/glusterfs.h
+@@ -583,6 +583,7 @@ struct _cmd_args {
+     uint32_t attr_times_granularity;
+ 
+     int fuse_flush_handle_interrupt;
++    int fuse_setlk_handle_interrupt;
+     int fuse_auto_inval;
+ 
+     bool global_threading;
+diff --git a/tests/features/flock_interrupt.t b/tests/features/flock_interrupt.t
+index b8717e30df..1899d57c5a 100644
+--- a/tests/features/flock_interrupt.t
++++ b/tests/features/flock_interrupt.t
+@@ -19,7 +19,7 @@ EXPECT 'Created' volinfo_field $V0 'Status';
+ TEST $CLI volume start $V0;
+ EXPECT 'Started' volinfo_field $V0 'Status';
+ 
+-TEST $GFS --volfile-id=$V0 --volfile-server=$H0 $M0;
++TEST $GFS --volfile-id=$V0 --volfile-server=$H0 --fuse-setlk-handle-interrupt=on $M0;
+ TEST touch $M0/testfile;
+ 
+ echo > got_lock
+diff --git a/xlators/mount/fuse/src/fuse-bridge.c b/xlators/mount/fuse/src/fuse-bridge.c
+index 89e7725ca7..b27de58e75 100644
+--- a/xlators/mount/fuse/src/fuse-bridge.c
++++ b/xlators/mount/fuse/src/fuse-bridge.c
+@@ -4740,14 +4740,19 @@ fuse_setlk_cbk(call_frame_t *frame, void *cookie, xlator_t *this,
+ {
+     uint32_t op = 0;
+     fuse_state_t *state = NULL;
++    fuse_private_t *priv = this->private;
+     int ret = 0;
+ 
+-    ret = fuse_interrupt_finish_fop(frame, this, _gf_true, (void **)&state);
+-    GF_FREE(state->name);
+-    dict_unref(state->xdata);
+-    GF_FREE(state);
+-    if (ret) {
+-        return 0;
++    if (priv->setlk_handle_interrupt) {
++        ret = fuse_interrupt_finish_fop(frame, this, _gf_true, (void **)&state);
++        if (state) {
++            GF_FREE(state->name);
++            dict_unref(state->xdata);
++            GF_FREE(state);
++        }
++        if (ret) {
++            return 0;
++        }
+     }
+ 
+     state = frame->root->state;
+@@ -4866,35 +4871,40 @@ fuse_setlk_resume(fuse_state_t *state)
+ {
+     fuse_interrupt_record_t *fir = NULL;
+     fuse_state_t *state_clone = NULL;
++    fuse_private_t *priv = NULL;
+ 
+-    fir = fuse_interrupt_record_new(state->finh, fuse_setlk_interrupt_handler);
+-    state_clone = gf_memdup(state, sizeof(*state));
+-    if (state_clone) {
+-        state_clone->xdata = dict_new();
+-    }
+-
+-    if (!fir || !state_clone || !state_clone->xdata) {
+-        if (fir) {
+-            GF_FREE(fir);
+-        }
++    priv = state->this->private;
++    if (priv->setlk_handle_interrupt) {
++        fir = fuse_interrupt_record_new(state->finh,
++                                        fuse_setlk_interrupt_handler);
++        state_clone = gf_memdup(state, sizeof(*state));
+         if (state_clone) {
+-            GF_FREE(state_clone);
++            state_clone->xdata = dict_new();
+         }
+-        send_fuse_err(state->this, state->finh, ENOMEM);
+ 
+-        gf_log("glusterfs-fuse", GF_LOG_ERROR,
+-               "SETLK%s unique %" PRIu64
+-               ":"
+-               " interrupt record allocation failed",
+-               state->finh->opcode == FUSE_SETLK ? "" : "W",
+-               state->finh->unique);
+-        free_fuse_state(state);
++        if (!fir || !state_clone || !state_clone->xdata) {
++            if (fir) {
++                GF_FREE(fir);
++            }
++            if (state_clone) {
++                GF_FREE(state_clone);
++            }
++            send_fuse_err(state->this, state->finh, ENOMEM);
+ 
+-        return;
++            gf_log("glusterfs-fuse", GF_LOG_ERROR,
++                   "SETLK%s unique %" PRIu64
++                   ":"
++                   " interrupt record allocation failed",
++                   state->finh->opcode == FUSE_SETLK ? "" : "W",
++                   state->finh->unique);
++            free_fuse_state(state);
++
++            return;
++        }
++        state_clone->name = NULL;
++        fir->data = state_clone;
++        fuse_interrupt_record_insert(state->this, fir);
+     }
+-    state_clone->name = NULL;
+-    fir->data = state_clone;
+-    fuse_interrupt_record_insert(state->this, fir);
+ 
+     gf_log("glusterfs-fuse", GF_LOG_TRACE, "%" PRIu64 ": SETLK%s %p",
+            state->finh->unique, state->finh->opcode == FUSE_SETLK ? "" : "W",
+@@ -6886,6 +6896,8 @@ init(xlator_t *this_xl)
+ 
+     GF_OPTION_INIT("flush-handle-interrupt", priv->flush_handle_interrupt, bool,
+                    cleanup_exit);
++    GF_OPTION_INIT("setlk-handle-interrupt", priv->setlk_handle_interrupt, bool,
++                   cleanup_exit);
+ 
+     GF_OPTION_INIT("fuse-dev-eperm-ratelimit-ns",
+                    priv->fuse_dev_eperm_ratelimit_ns, uint32, cleanup_exit);
+@@ -7192,6 +7204,12 @@ struct volume_options options[] = {
+         .description =
+             "Handle iterrupts in FLUSH handler (for testing purposes).",
+     },
++    {
++        .key = {"setlk-handle-interrupt"},
++        .type = GF_OPTION_TYPE_BOOL,
++        .default_value = "false",
++        .description = "Handle iterrupts in SETLK handler.",
++    },
+     {
+         .key = {"lru-limit"},
+         .type = GF_OPTION_TYPE_INT,
+diff --git a/xlators/mount/fuse/src/fuse-bridge.h b/xlators/mount/fuse/src/fuse-bridge.h
+index 2ef24fd9d1..2be29f3c68 100644
+--- a/xlators/mount/fuse/src/fuse-bridge.h
++++ b/xlators/mount/fuse/src/fuse-bridge.h
+@@ -171,6 +171,7 @@ struct fuse_private {
+     pthread_mutex_t interrupt_mutex;
+ 
+     gf_boolean_t flush_handle_interrupt;
++    gf_boolean_t setlk_handle_interrupt;
+     gf_boolean_t fuse_auto_inval;
+ 
+     /* LRU Limit, if not set, default is 64k for now */
+diff --git a/xlators/mount/fuse/utils/mount.glusterfs.in b/xlators/mount/fuse/utils/mount.glusterfs.in
+index eecb60bb02..c4d08977b6 100755
+--- a/xlators/mount/fuse/utils/mount.glusterfs.in
++++ b/xlators/mount/fuse/utils/mount.glusterfs.in
+@@ -322,6 +322,10 @@ start_glusterfs ()
+         cmd_line=$(echo "$cmd_line --fuse-flush-handle-interrupt=$fuse_flush_handle_interrupt");
+     fi
+ 
++    if [ -n "$fuse_setlk_handle_interrupt" ]; then
++        cmd_line=$(echo "$cmd_line --fuse-setlk-handle-interrupt=$fuse_setlk_handle_interrupt");
++    fi
++
+     if [ -n "$process_name" ]; then
+         cmd_line=$(echo "$cmd_line --process-name fuse.$process_name");
+     else
+@@ -619,6 +623,9 @@ with_options()
+         "fuse-flush-handle-interrupt")
+             fuse_flush_handle_interrupt=$value
+             ;;
++        "fuse-setlk-handle-interrupt")
++            fuse_setlk_handle_interrupt=$value
++            ;;
+         "fuse-dev-eperm-ratelimit-ns")
+             fuse_dev_eperm_ratelimit_ns=$value
+             ;;
+-- 
+2.55.0
+

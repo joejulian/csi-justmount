@@ -1,0 +1,16 @@
+diff --git a/debian/rules b/debian/rules
+index f767164..44ac13d 100755
+--- a/debian/rules
++++ b/debian/rules
+@@ -10,9 +10,10 @@ endif
+ 
+ export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+ 
+ DEB_CONFIGURE_EXTRA_FLAGS := \
+-	--disable-linux-io_uring --enable-firewalld --libexecdir=/usr/lib/$(DEB_HOST_MULTIARCH)
++	--disable-linux-io_uring --disable-lto --enable-firewalld \
++	--libexecdir=/usr/lib/$(DEB_HOST_MULTIARCH)
+ 
+ # Disable tcmalloc due to problems with dlopen (LP: #1950777 #1951126 Debian: #999700 #999619)
+ DEB_CONFIGURE_EXTRA_FLAGS += --without-tcmalloc
+ 

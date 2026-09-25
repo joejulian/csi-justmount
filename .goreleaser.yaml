@@ -22,6 +22,8 @@ checksum:
 dockers_v2:
   - id: justmount
     dockerfile: Dockerfile.goreleaser
+    extra_files:
+      - build/glusterfs
     ids:
       - justmount
     images:

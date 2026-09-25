@@ -1,0 +1,405 @@
+From 9600359667df534012683a73449f9b17397f42a9 Mon Sep 17 00:00:00 2001
+From: Joe Julian <me@joejulian.name>
+Date: Mon, 10 Aug 2026 12:04:01 -0700
+Subject: [PATCH] rpc: prevent expired requests from disconnecting clients
+
+Protocol-v2 lock requests were not recognized as lock FOPs, so valid blocking locks entered the ordinary frame-timeout queue. A late reply for an expired frame then made MAP_XID fail, which the socket layer treated as a transport failure.
+
+Recognize both FOP protocol versions and consume replies for unknown or expired XIDs without disconnecting unrelated requests. During a real disconnect, unwind ordinary frames before lock frames so a FUSE lock callback cannot wait on an interrupt FGETXATTR queued behind it.
+
+Add regressions for blocking locks crossing frame timeout, disconnect cleanup during lock interruption, and late ordinary replies.
+
+Signed-off-by: Joe Julian <me@joejulian.name>
+---
+ rpc/rpc-lib/src/rpc-clnt.c                    | 26 ++++--
+ .../basic/fuse/blocking-lock-frame-timeout.c  | 87 +++++++++++++++++++
+ .../basic/fuse/blocking-lock-frame-timeout.t  | 63 ++++++++++++++
+ .../fuse/disconnect-unwind-lock-interrupt.t   | 69 +++++++++++++++
+ .../fuse/late-reply-does-not-disconnect.t     | 76 ++++++++++++++++
+ 5 files changed, 314 insertions(+), 7 deletions(-)
+ create mode 100644 tests/basic/fuse/blocking-lock-frame-timeout.c
+ create mode 100644 tests/basic/fuse/blocking-lock-frame-timeout.t
+ create mode 100644 tests/basic/fuse/disconnect-unwind-lock-interrupt.t
+ create mode 100644 tests/basic/fuse/late-reply-does-not-disconnect.t
+
+diff --git a/rpc/rpc-lib/src/rpc-clnt.c b/rpc/rpc-lib/src/rpc-clnt.c
+index 0d6db1b302..23519e9a2f 100644
+--- a/rpc/rpc-lib/src/rpc-clnt.c
++++ b/rpc/rpc-lib/src/rpc-clnt.c
+@@ -47,7 +47,8 @@ _is_lock_fop(struct saved_frame *sframe)
+     int fop = 0;
+ 
+     if (SFRAME_GET_PROGNUM(sframe) == GLUSTER_FOP_PROGRAM &&
+-        SFRAME_GET_PROGVER(sframe) == GLUSTER_FOP_VERSION)
++        (SFRAME_GET_PROGVER(sframe) == GLUSTER_FOP_VERSION ||
++         SFRAME_GET_PROGVER(sframe) == GLUSTER_FOP_VERSION_v2))
+         fop = SFRAME_GET_PROCNUM(sframe);
+ 
+     return ((fop == GFS3_OP_LK) || (fop == GFS3_OP_INODELK) ||
+@@ -321,7 +322,13 @@ saved_frames_unwind(struct saved_frames *saved_frames)
+         0,
+     };
+ 
+-    list_splice_init(&saved_frames->lk_sf.list, &saved_frames->sf.list);
++    /*
++     * A FUSE lock interrupt sends an ordinary FGETXATTR request and then
++     * synchronously waits for it from the LK callback.  Unwind ordinary
++     * requests first so a disconnect cannot strand that dependency behind
++     * the callback that is waiting for it.
++     */
++    list_append_init(&saved_frames->lk_sf.list, &saved_frames->sf.list);
+ 
+     list_for_each_entry_safe(trav, tmp, &saved_frames->sf.list, list)
+     {
+@@ -432,11 +439,17 @@ rpc_clnt_fill_request_info(struct rpc_clnt *clnt, rpc_request_info_t *info)
+     pthread_mutex_unlock(&clnt->conn.lock);
+ 
+     if (ret == -1) {
+-        gf_log(clnt->conn.name, GF_LOG_CRITICAL,
+-               "cannot lookup the saved "
+-               "frame corresponding to xid (%d)",
++        /*
++         * The request may have timed out while its reply was in flight.  Its
++         * record framing is still valid, so let the transport consume the
++         * reply through the non-vectored path and discard it at lookup rather
++         * than disconnecting unrelated requests on the same connection.
++         */
++        gf_log(clnt->conn.name, GF_LOG_WARNING,
++               "reply for unknown or expired xid (%" PRIu32
++               ") will be discarded",
+                info->xid);
+-        goto out;
++        return 0;
+     }
+ 
+     info->prognum = saved_frame.rpcreq->prog->prognum;
+@@ -446,7 +459,6 @@ rpc_clnt_fill_request_info(struct rpc_clnt *clnt, rpc_request_info_t *info)
+     info->rsp = saved_frame.rsp;
+ 
+     ret = 0;
+-out:
+     return ret;
+ }
+ 
+diff --git a/tests/basic/fuse/blocking-lock-frame-timeout.c b/tests/basic/fuse/blocking-lock-frame-timeout.c
+new file mode 100644
+index 0000000000..7df977fb24
+--- /dev/null
++++ b/tests/basic/fuse/blocking-lock-frame-timeout.c
+@@ -0,0 +1,87 @@
++#include <errno.h>
++#include <fcntl.h>
++#include <stdio.h>
++#include <string.h>
++#include <unistd.h>
++
++static int
++create_marker(const char *path)
++{
++    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
++
++    if (fd < 0) {
++        fprintf(stderr, "open(%s): %s\n", path, strerror(errno));
++        return -1;
++    }
++
++    return close(fd);
++}
++
++static int
++wait_for_release(const char *path)
++{
++    char byte;
++    int fd = open(path, O_RDONLY);
++
++    if (fd < 0) {
++        fprintf(stderr, "open(%s): %s\n", path, strerror(errno));
++        return -1;
++    }
++
++    if (read(fd, &byte, 1) < 0) {
++        fprintf(stderr, "read(%s): %s\n", path, strerror(errno));
++        close(fd);
++        return -1;
++    }
++
++    return close(fd);
++}
++
++int
++main(int argc, char **argv)
++{
++    struct flock lock = {
++        .l_type = F_WRLCK,
++        .l_whence = SEEK_SET,
++        .l_start = 0,
++        .l_len = 0,
++    };
++    int fd = -1;
++    int ret = 1;
++
++    if (argc != 3 && argc != 4) {
++        fprintf(stderr, "usage: %s file acquired-marker [release-marker]\n",
++                argv[0]);
++        return 2;
++    }
++
++    fd = open(argv[1], O_RDWR | O_CREAT, 0600);
++    if (fd < 0) {
++        fprintf(stderr, "open(%s): %s\n", argv[1], strerror(errno));
++        goto out;
++    }
++
++    if (fcntl(fd, F_SETLKW, &lock) < 0) {
++        fprintf(stderr, "fcntl(F_SETLKW): %s\n", strerror(errno));
++        goto out;
++    }
++
++    if (create_marker(argv[2]) < 0)
++        goto out;
++
++    if (argc == 4 && wait_for_release(argv[3]) < 0)
++        goto out;
++
++    lock.l_type = F_UNLCK;
++    if (fcntl(fd, F_SETLK, &lock) < 0) {
++        fprintf(stderr, "fcntl(F_SETLK): %s\n", strerror(errno));
++        goto out;
++    }
++
++    ret = 0;
++
++out:
++    if (fd >= 0)
++        close(fd);
++    return ret;
++}
+diff --git a/tests/basic/fuse/blocking-lock-frame-timeout.t b/tests/basic/fuse/blocking-lock-frame-timeout.t
+new file mode 100644
+index 0000000000..0ca1c543eb
+--- /dev/null
++++ b/tests/basic/fuse/blocking-lock-frame-timeout.t
+@@ -0,0 +1,63 @@
++#!/bin/bash
++
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++
++lock_helper=$(dirname $0)/blocking-lock-frame-timeout
++holder_pid=""
++waiter_pid=""
++
++function marker_exists {
++    if [ -e "$1" ]; then
++        echo Y
++    else
++        echo N
++    fi
++}
++
++function cleanup_test {
++    [ -n "$waiter_pid" ] && kill "$waiter_pid" >/dev/null 2>&1 || true
++    [ -n "$holder_pid" ] && kill "$holder_pid" >/dev/null 2>&1 || true
++    cleanup_tester "$lock_helper"
++    cleanup
++}
++
++cleanup
++trap cleanup_test EXIT
++
++TEST build_tester ${lock_helper}.c
++TEST glusterd
++TEST pidof glusterd
++TEST $CLI volume create $V0 $H0:$B0/${V0}1
++TEST $CLI volume set $V0 network.frame-timeout 1
++TEST $CLI volume start $V0
++TEST $GFS --volfile-id=/$V0 --volfile-server=$H0 $M0
++
++holder_ready=$B0/$V0-holder-ready
++holder_release=$B0/$V0-holder-release
++waiter_acquired=$B0/$V0-waiter-acquired
++
++TEST mkfifo $holder_release
++$lock_helper $M0/lockfile $holder_ready $holder_release &
++holder_pid=$!
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT Y marker_exists $holder_ready
++
++$lock_helper $M0/lockfile $waiter_acquired &
++waiter_pid=$!
++
++# Lock RPCs can legitimately wait without a deadline.  The RPC bailout timer
++# runs every ten seconds, so keep the lock blocked long enough to cross both
++# the configured frame timeout and a bailout scan.
++sleep 12
++TEST kill -0 $waiter_pid
++EXPECT N marker_exists $waiter_acquired
++
++TEST dd if=/dev/zero of=$holder_release bs=1 count=1 status=none
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT Y marker_exists $waiter_acquired
++TEST wait $waiter_pid
++waiter_pid=""
++TEST wait $holder_pid
++holder_pid=""
++
++trap - EXIT
++cleanup_test
+diff --git a/tests/basic/fuse/disconnect-unwind-lock-interrupt.t b/tests/basic/fuse/disconnect-unwind-lock-interrupt.t
+new file mode 100644
+index 0000000000..584a4fcecb
+--- /dev/null
++++ b/tests/basic/fuse/disconnect-unwind-lock-interrupt.t
+@@ -0,0 +1,69 @@
++#!/bin/bash
++
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++
++waiter_pid=""
++
++function process_state {
++    if kill -0 "$1" >/dev/null 2>&1; then
++        echo Y
++    else
++        echo N
++    fi
++}
++
++function mount_responds {
++    if stat $M0/lockfile >/dev/null 2>&1; then
++        echo Y
++    else
++        echo N
++    fi
++}
++
++function cleanup_test {
++    [ -n "$waiter_pid" ] && kill "$waiter_pid" >/dev/null 2>&1 || true
++    exec 8>&-
++    cleanup
++}
++
++cleanup
++trap cleanup_test EXIT
++
++TEST glusterd
++TEST pidof glusterd
++TEST $CLI volume create $V0 $H0:$B0/${V0}1
++TEST $CLI volume set $V0 delay-gen locks
++TEST $CLI volume set $V0 delay-gen.delay-duration 30000000
++TEST $CLI volume set $V0 delay-gen.delay-percentage 100
++TEST $CLI volume set $V0 delay-gen.enable fgetxattr
++TEST $CLI volume start $V0
++TEST $GFS --volfile-id=/$V0 --volfile-server=$H0 \
++          --fuse-setlk-handle-interrupt=on $M0
++
++mount_pid=$(get_mount_process_pid $V0)
++TEST touch $M0/lockfile
++exec 8>$M0/lockfile
++TEST flock -x 8
++
++# The timeout interrupts this blocked lock.  Its cancellation FGETXATTR is
++# held in delay-gen so both it and the original LK are pending at disconnect.
++flock -x -w 1 $M0/lockfile true &
++waiter_pid=$!
++sleep 2
++EXPECT Y process_state $waiter_pid
++
++TEST kill_brick $V0 $H0 $B0/${V0}1
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT N process_state $waiter_pid
++kill "$waiter_pid" >/dev/null 2>&1 || true
++wait $waiter_pid >/dev/null 2>&1 || true
++waiter_pid=""
++exec 8>&-
++
++TEST $CLI volume start $V0 force
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT 1 brick_up_status $V0 $H0 $B0/${V0}1
++EXPECT_WITHIN $CHILD_UP_TIMEOUT Y mount_responds
++EXPECT $mount_pid get_mount_process_pid $V0
++
++trap - EXIT
++cleanup_test
+diff --git a/tests/basic/fuse/late-reply-does-not-disconnect.t b/tests/basic/fuse/late-reply-does-not-disconnect.t
+new file mode 100644
+index 0000000000..1b34940a20
+--- /dev/null
++++ b/tests/basic/fuse/late-reply-does-not-disconnect.t
+@@ -0,0 +1,76 @@
++#!/bin/bash
++
++. $(dirname $0)/../../include.rc
++. $(dirname $0)/../../volume.rc
++
++io_pid=""
++
++function process_state {
++    if kill -0 "$1" >/dev/null 2>&1; then
++        echo Y
++    else
++        echo N
++    fi
++}
++
++function log_count {
++    grep -E -c "$1" "$2" 2>/dev/null || true
++}
++
++function log_count_increased {
++    if [ "$(log_count "$2" "$3")" -gt "$1" ]; then
++        echo Y
++    else
++        echo N
++    fi
++}
++
++function cleanup_test {
++    [ -n "$io_pid" ] && kill "$io_pid" >/dev/null 2>&1 || true
++    cleanup
++}
++
++cleanup
++trap cleanup_test EXIT
++
++TEST glusterd
++TEST pidof glusterd
++TEST $CLI volume create $V0 $H0:$B0/${V0}1
++TEST $CLI volume set $V0 network.frame-timeout 1
++TEST $CLI volume set $V0 delay-gen posix
++TEST $CLI volume set $V0 delay-gen.delay-duration 30000000
++TEST $CLI volume set $V0 delay-gen.delay-percentage 100
++TEST $CLI volume set $V0 delay-gen.enable fsync
++TEST $CLI volume start $V0
++
++client_log=$B0/$V0-client.log
++TEST $GFS --volfile-id=/$V0 --volfile-server=$H0 \
++          --log-file=$client_log --log-level=DEBUG $M0
++
++mount_pid=$(get_mount_process_pid $V0)
++connected_pattern="Connected, attached to remote volume"
++disconnected_pattern="disconnected from client"
++late_reply_pattern="reply for unknown or expired xid|cannot lookup the saved frame corresponding to xid"
++connected_before=$(log_count "$connected_pattern" "$client_log")
++disconnected_before=$(log_count "$disconnected_pattern" "$client_log")
++late_replies_before=$(log_count "$late_reply_pattern" "$client_log")
++
++# FSYNC is an ordinary RPC.  Let its frame time out while delay-gen keeps the
++# valid reply in flight long enough for it to arrive after the frame is gone.
++dd if=/dev/zero of=$M0/delayed-fsync bs=1 count=1 conv=fsync >/dev/null 2>&1 &
++io_pid=$!
++EXPECT_WITHIN $PROCESS_UP_TIMEOUT N process_state $io_pid
++kill "$io_pid" >/dev/null 2>&1 || true
++wait $io_pid >/dev/null 2>&1 || true
++io_pid=""
++
++EXPECT_WITHIN 40 Y log_count_increased "$late_replies_before" \
++              "$late_reply_pattern" "$client_log"
++EXPECT "$connected_before" log_count "$connected_pattern" "$client_log"
++EXPECT "$disconnected_before" log_count "$disconnected_pattern" "$client_log"
++EXPECT $mount_pid get_mount_process_pid $V0
++TEST touch $M0/unrelated-io
++TEST stat $M0/unrelated-io
++
++trap - EXIT
++cleanup_test
+-- 
+2.55.0
+

@@ -2,7 +2,10 @@ package node
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"syscall"
 
 	csi "github.com/container-storage-interface/spec/lib/go/csi"
@@ -21,86 +24,56 @@ func (n *Node) NodeGetInfo(ctx context.Context, req *csi.NodeGetInfoRequest) (*c
 	return resp, nil
 }
 
-// NodeGetVolumeStats reports volume usage and CSI volume health.
+// NodeGetVolumeStats reports usage; health is exposed by NodeGetVolumeHealth.
 func (n *Node) NodeGetVolumeStats(ctx context.Context, req *csi.NodeGetVolumeStatsRequest) (*csi.NodeGetVolumeStatsResponse, error) {
-	Logger(ctx).Info("NodeGetVolumeStats start",
-		zap.String("volume_id", req.GetVolumeId()),
-		zap.String("volume_path", req.GetVolumePath()),
-	)
+	if req.GetVolumeId() == "" || req.GetVolumePath() == "" {
+		return nil, status.Error(codes.InvalidArgument, "volume_id and volume_path are required")
+	}
+	stat, err := statVolumePath(req.GetVolumePath())
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to get volume usage: %v", err)
+	}
+	return &csi.NodeGetVolumeStatsResponse{Usage: volumeUsageFromStatfs(stat)}, nil
+}
 
+// NodeGetVolumeHealth reports mount health using the CSI health RPC.
+func (n *Node) NodeGetVolumeHealth(ctx context.Context, req *csi.NodeGetVolumeHealthRequest) (*csi.NodeGetVolumeHealthResponse, error) {
 	if req.GetVolumeId() == "" {
-		Logger(ctx).Error("NodeGetVolumeStats invalid argument: volume_id is required")
 		return nil, status.Error(codes.InvalidArgument, "volume_id is required")
 	}
-	if req.GetVolumePath() == "" {
-		Logger(ctx).Error("NodeGetVolumeStats invalid argument: volume_path is required")
-		return nil, status.Error(codes.InvalidArgument, "volume_path is required")
-	}
-
-	if err := probeMountPath(req.GetVolumePath()); err != nil {
-		if !isDisconnectedMountError(err) {
-			Logger(ctx).Error("NodeGetVolumeStats failed to probe volume path",
-				zap.String("volume_id", req.GetVolumeId()),
-				zap.String("volume_path", req.GetVolumePath()),
-				zap.Error(err),
-			)
-			return nil, status.Errorf(codes.Internal, "failed to probe volume path: %v", err)
+	health := &csi.VolumeHealth{VolumeId: req.GetVolumeId()}
+	for _, path := range []string{req.GetVolumePublishPath(), req.GetStagingTargetPath()} {
+		if path == "" {
+			continue
 		}
-
-		message := fmt.Sprintf("volume path is disconnected: %v", err)
-		Logger(ctx).Warn("NodeGetVolumeStats reporting abnormal volume condition",
-			zap.String("volume_id", req.GetVolumeId()),
-			zap.String("volume_path", req.GetVolumePath()),
-			zap.String("message", message),
-			zap.Error(err),
-		)
-		return &csi.NodeGetVolumeStatsResponse{
-			VolumeCondition: &csi.VolumeCondition{
-				Abnormal: true,
-				Message:  message,
-			},
-		}, nil
+		if !filepath.IsAbs(path) {
+			return nil, status.Error(codes.InvalidArgument, "volume paths must be absolute")
+		}
+		if _, err := statVolumePath(path); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return nil, status.Errorf(codes.NotFound, "volume path does not exist: %v", err)
+			}
+			if !isDisconnectedMountError(err) {
+				return nil, status.Errorf(codes.Internal, "failed to check volume health: %v", err)
+			}
+			health.HealthStatuses = []*csi.VolumeHealth_VolumeHealthEntry{{
+				Status:  csi.VolumeHealthErrorType_INACCESSIBLE,
+				Reason:  "MountDisconnected",
+				Message: fmt.Sprintf("volume path %q is disconnected: %v", path, err),
+			}}
+			break
+		}
 	}
+	return &csi.NodeGetVolumeHealthResponse{VolumeHealth: health}, nil
+}
 
+func statVolumePath(path string) (syscall.Statfs_t, error) {
 	var stat syscall.Statfs_t
-	if err := syscall.Statfs(req.GetVolumePath(), &stat); err != nil {
-		if !isDisconnectedMountError(err) {
-			Logger(ctx).Error("NodeGetVolumeStats failed to statfs volume path",
-				zap.String("volume_id", req.GetVolumeId()),
-				zap.String("volume_path", req.GetVolumePath()),
-				zap.Error(err),
-			)
-			return nil, status.Errorf(codes.Internal, "failed to statfs volume path: %v", err)
-		}
-
-		message := fmt.Sprintf("volume path statfs reports disconnected mount: %v", err)
-		Logger(ctx).Warn("NodeGetVolumeStats reporting abnormal volume condition",
-			zap.String("volume_id", req.GetVolumeId()),
-			zap.String("volume_path", req.GetVolumePath()),
-			zap.String("message", message),
-			zap.Error(err),
-		)
-		return &csi.NodeGetVolumeStatsResponse{
-			VolumeCondition: &csi.VolumeCondition{
-				Abnormal: true,
-				Message:  message,
-			},
-		}, nil
+	if err := probeMountPath(path); err != nil {
+		return stat, err
 	}
-
-	usage := volumeUsageFromStatfs(stat)
-	Logger(ctx).Info("NodeGetVolumeStats complete",
-		zap.String("volume_id", req.GetVolumeId()),
-		zap.String("volume_path", req.GetVolumePath()),
-		zap.Int("usage_entries", len(usage)),
-	)
-	return &csi.NodeGetVolumeStatsResponse{
-		Usage: usage,
-		VolumeCondition: &csi.VolumeCondition{
-			Abnormal: false,
-			Message:  "volume path is usable",
-		},
-	}, nil
+	err := syscall.Statfs(path, &stat)
+	return stat, err
 }
 
 func volumeUsageFromStatfs(stat syscall.Statfs_t) []*csi.VolumeUsage {

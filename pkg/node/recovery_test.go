@@ -246,55 +246,76 @@ func TestNodePublishVolumeUnstagesDisconnectedStagingAndDependentBinds(t *testin
 	}
 }
 
-func TestNodeGetVolumeStatsReportsDisconnectedVolumeCondition(t *testing.T) {
+func TestNodeGetVolumeHealthReportsDisconnectedMount(t *testing.T) {
 	volumePath := t.TempDir()
-	n := NewNodeWithMounter("node-id", "/tmp/test-csi.sock", &recordingMounter{mounted: map[string]bool{}})
+	n := NewNodeWithMounter("node-id", "/tmp/test-csi.sock", &recordingMounter{})
+	origProbe := probeMountPath
+	probeMountPath = func(string) error { return syscall.ENOTCONN }
+	t.Cleanup(func() { probeMountPath = origProbe })
 
-	origProbeMountPath := probeMountPath
-	probeMountPath = func(path string) error {
-		if path == volumePath {
-			return syscall.ENOTCONN
-		}
-		return nil
-	}
-	t.Cleanup(func() { probeMountPath = origProbeMountPath })
-
-	resp, err := n.NodeGetVolumeStats(context.Background(), &csi.NodeGetVolumeStatsRequest{
-		VolumeId:   "test-volume",
-		VolumePath: volumePath,
+	resp, err := n.NodeGetVolumeHealth(context.Background(), &csi.NodeGetVolumeHealthRequest{
+		VolumeId: "test-volume", StagingTargetPath: volumePath,
 	})
 	if err != nil {
-		t.Fatalf("NodeGetVolumeStats() error = %v, want nil", err)
+		t.Fatal(err)
 	}
-	if resp.GetVolumeCondition() == nil {
-		t.Fatalf("NodeGetVolumeStats() volume condition = nil, want abnormal condition")
+	health := resp.GetVolumeHealth()
+	if health.GetVolumeId() != "test-volume" || len(health.GetHealthStatuses()) != 1 {
+		t.Fatalf("NodeGetVolumeHealth() = %v, want one health entry for test-volume", health)
 	}
-	if !resp.GetVolumeCondition().GetAbnormal() {
-		t.Fatalf("NodeGetVolumeStats() abnormal = false, want true")
+	entry := health.GetHealthStatuses()[0]
+	if entry.GetStatus() != csi.VolumeHealthErrorType_INACCESSIBLE || entry.GetReason() != "MountDisconnected" || entry.GetMessage() == "" {
+		t.Errorf("NodeGetVolumeHealth() entry = %v, want inaccessible mount diagnostic", entry)
 	}
-	if resp.GetVolumeCondition().GetMessage() == "" {
-		t.Fatalf("NodeGetVolumeStats() message = empty, want diagnostic message")
+	if _, err := n.NodeGetVolumeStats(context.Background(), &csi.NodeGetVolumeStatsRequest{VolumeId: "test-volume", VolumePath: volumePath}); status.Code(err) != codes.Internal {
+		t.Errorf("NodeGetVolumeStats(disconnected) error = %v, want Internal", err)
 	}
 }
 
-func TestNodeGetVolumeStatsReportsHealthyVolumeCondition(t *testing.T) {
+func TestNodeGetVolumeStatsAndHealthForUsablePath(t *testing.T) {
 	volumePath := t.TempDir()
-	n := NewNodeWithMounter("node-id", "/tmp/test-csi.sock", &recordingMounter{mounted: map[string]bool{}})
-
-	resp, err := n.NodeGetVolumeStats(context.Background(), &csi.NodeGetVolumeStatsRequest{
-		VolumeId:   "test-volume",
-		VolumePath: volumePath,
-	})
+	n := NewNodeWithMounter("node-id", "/tmp/test-csi.sock", &recordingMounter{})
+	resp, err := n.NodeGetVolumeStats(context.Background(), &csi.NodeGetVolumeStatsRequest{VolumeId: "test-volume", VolumePath: volumePath})
 	if err != nil {
-		t.Fatalf("NodeGetVolumeStats() error = %v, want nil", err)
-	}
-	if resp.GetVolumeCondition() == nil {
-		t.Fatalf("NodeGetVolumeStats() volume condition = nil, want healthy condition")
-	}
-	if resp.GetVolumeCondition().GetAbnormal() {
-		t.Fatalf("NodeGetVolumeStats() abnormal = true, want false")
+		t.Fatal(err)
 	}
 	if len(resp.GetUsage()) == 0 {
-		t.Fatalf("NodeGetVolumeStats() usage entries = 0, want at least one")
+		t.Error("NodeGetVolumeStats() has no usage entries")
+	}
+	health, err := n.NodeGetVolumeHealth(context.Background(), &csi.NodeGetVolumeHealthRequest{VolumeId: "test-volume", VolumePublishPath: volumePath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if health.GetVolumeHealth().GetVolumeId() != "test-volume" || len(health.GetVolumeHealth().GetHealthStatuses()) != 0 {
+		t.Errorf("NodeGetVolumeHealth() = %v, want no adverse conditions for test-volume", health)
+	}
+}
+
+func TestNodeGetVolumeHealthValidation(t *testing.T) {
+	n := NewNodeWithMounter("node-id", "/tmp/test-csi.sock", &recordingMounter{})
+	for _, req := range []*csi.NodeGetVolumeHealthRequest{
+		{}, {VolumeId: "test-volume", VolumePublishPath: "relative"},
+	} {
+		if _, err := n.NodeGetVolumeHealth(context.Background(), req); status.Code(err) != codes.InvalidArgument {
+			t.Errorf("NodeGetVolumeHealth(%v) error = %v, want InvalidArgument", req, err)
+		}
+	}
+	resp, err := n.NodeGetVolumeHealth(context.Background(), &csi.NodeGetVolumeHealthRequest{VolumeId: "test-volume"})
+	if err != nil || resp.GetVolumeHealth().GetVolumeId() != "test-volume" {
+		t.Errorf("NodeGetVolumeHealth(no optional paths) = %v, %v", resp, err)
+	}
+	origProbe := probeMountPath
+	probeMountPath = func(string) error { return syscall.EACCES }
+	t.Cleanup(func() { probeMountPath = origProbe })
+	if _, err := n.NodeGetVolumeHealth(context.Background(), &csi.NodeGetVolumeHealthRequest{VolumeId: "test-volume", VolumePublishPath: t.TempDir()}); status.Code(err) != codes.Internal {
+		t.Errorf("NodeGetVolumeHealth(permission denied) error = %v, want Internal", err)
+	}
+}
+
+func TestNodeGetVolumeHealthMissingPath(t *testing.T) {
+	n := NewNodeWithMounter("node-id", "/tmp/test-csi.sock", &recordingMounter{})
+	_, err := n.NodeGetVolumeHealth(context.Background(), &csi.NodeGetVolumeHealthRequest{VolumeId: "test-volume", VolumePublishPath: filepath.Join(t.TempDir(), "missing")})
+	if status.Code(err) != codes.NotFound {
+		t.Errorf("NodeGetVolumeHealth(missing path) error = %v, want NotFound", err)
 	}
 }

@@ -170,6 +170,18 @@ just kind-test
 just kind-clean
 ```
 
+### Volume health
+
+CSI 1.13 replaces the alpha `VolumeCondition` fields with
+`NodeGetVolumeHealth`. Justmount advertises `GET_VOLUME_HEALTH` and reports
+`INACCESSIBLE` for disconnected published or staging mounts. With no optional
+paths supplied, it reports no known adverse condition. `NodeGetVolumeStats`
+continues to return capacity usage and returns an RPC error when the path
+cannot be inspected. Existing PVC repair condition reporting is unchanged.
+
+The CSI specification and csi-test dependencies must be upgraded together:
+csi-test 5.5 uses the removed fields; 5.6 exercises the replacement API.
+
 ### Release Notes
 
 Release automation uses Conventional Commits. Please use a conventional commit

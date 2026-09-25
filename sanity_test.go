@@ -95,6 +95,19 @@ type testControllerServer struct {
 	csi.UnimplementedIdentityServer
 }
 
+// CreateVolume supplies static-volume metadata to node health sanity tests.
+// The test controller never provisions storage; all mounts use FakeMounter.
+func (testControllerServer) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) (*csi.CreateVolumeResponse, error) {
+	return &csi.CreateVolumeResponse{Volume: &csi.Volume{
+		VolumeId:      req.GetName(),
+		VolumeContext: map[string]string{"fsType": "ext4", "fileMode": "0755", "source": "dummy"},
+	}}, nil
+}
+
+func (testControllerServer) DeleteVolume(ctx context.Context, req *csi.DeleteVolumeRequest) (*csi.DeleteVolumeResponse, error) {
+	return &csi.DeleteVolumeResponse{}, nil
+}
+
 func (testControllerServer) ControllerGetCapabilities(ctx context.Context, req *csi.ControllerGetCapabilitiesRequest) (*csi.ControllerGetCapabilitiesResponse, error) {
 	return &csi.ControllerGetCapabilitiesResponse{
 		Capabilities: []*csi.ControllerServiceCapability{

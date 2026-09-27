@@ -167,7 +167,7 @@ require (
 	github.com/mattn/go-isatty v0.0.22 // indirect
 	github.com/mattn/go-runewidth v0.0.24 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.1 // indirect
-	github.com/maxbrunsfeld/counterfeiter/v6 v6.13.0 // indirect
+	github.com/maxbrunsfeld/counterfeiter/v6 v6.14.0 // indirect
 	github.com/mgechev/revive v1.17.0 // indirect
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect

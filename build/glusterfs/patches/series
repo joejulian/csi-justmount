@@ -1,0 +1,3 @@
+0001-fuse-setlk-handle-interrupt.patch
+0002-rpc-lock-timeout-reconnect.patch
+0003-debian-disable-lto.patch

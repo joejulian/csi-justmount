@@ -1,0 +1,3 @@
+db9feb7be5c33eedd93b8f615abdcb51a5cf93211e2a57936c10a5320172561a  0001-fuse-setlk-handle-interrupt.patch
+d803a25de01021c67c420e110ae75e5bf81771d163ab7359fb74a84e17b4904d  0002-rpc-lock-timeout-reconnect.patch
+750d511dbb7a4626d43842945880b4fd4e80e54d27d08e749658c547ddf199e8  0003-debian-disable-lto.patch
